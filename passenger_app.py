@@ -8,33 +8,33 @@ import googlemaps
 # --- 1. CONFIG ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
-# --- 2. TRANSLATION DICTIONARY ---
+# --- 2. TRANSLATIONS ---
 LANGS = {
-    "🇬🇧 English": {
+    "EN": {
+        "flag": "🇬🇧",
         "title": "Herceg Novi Live Bus",
         "wait_label": "Where are you waiting?",
         "next_arr": "Next Bus to",
         "mins": "mins",
         "no_bus": "No buses currently active on Line 1.",
-        "station_help": "Select a station or tap the map",
         "refresh": "Refresh Map"
     },
-    "🇲🇪 Crnogorski": {
+    "ME": {
+        "flag": "🇲🇪",
         "title": "Herceg Novi - Autobus Uživo",
         "wait_label": "Gdje čekate autobus?",
         "next_arr": "Sledeći autobus za",
         "mins": "min",
         "no_bus": "Trenutno nema aktivnih autobusa na Liniji 1.",
-        "station_help": "Izaberite stanicu ili kliknite na mapu",
         "refresh": "Osvježi mapu"
     },
-    "🇷🇺 Русский": {
+    "RU": {
+        "flag": "🇷🇺",
         "title": "Автобус Герцег-Нови Живьем",
         "wait_label": "Где вы ждете?",
         "next_arr": "Следующий автобус до",
         "mins": "мин",
         "no_bus": "На Линии 1 сейчас нет активных автобусов.",
-        "station_help": "Выберите станцию или нажмите на карту",
         "refresh": "Обновить карту"
     }
 }
@@ -55,31 +55,50 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 4. LANGUAGE & STATION STATE ---
-# Language Selector in Sidebar
-selected_lang_name = st.sidebar.selectbox("Language / Jezik / Язык", list(LANGS.keys()))
-txt = LANGS[selected_lang_name]
+# --- 4. STATE MANAGEMENT ---
+if "lang" not in st.session_state:
+    st.session_state.lang = "EN"
 
 if "selected_station" not in st.session_state:
     qp = st.query_params
     st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
-# --- 5. UI ---
+txt = LANGS[st.session_state.lang]
+
+# --- 5. UI: TITLE & STATION SELECTION ---
 st.title(f"🚌 {txt['title']}")
 
-def handle_dropdown():
-    st.session_state.selected_station = st.session_state.manual_choice
-
+# Station Selection Dropdown
 selected_stop = st.selectbox(
     txt['wait_label'],
     options=ROUTE_ORDER,
     index=ROUTE_ORDER.index(st.session_state.selected_station),
-    key="manual_choice",
-    on_change=handle_dropdown,
-    help=txt['station_help']
+    key="manual_choice"
 )
 
-# --- 6. ETA LOGIC ---
+if selected_stop != st.session_state.selected_station:
+    st.session_state.selected_station = selected_stop
+    st.rerun()
+
+# --- 6. FLAG BUTTONS (Direct Selection) ---
+# We create 3 columns to place flags side-by-side
+st.write("---") # Visual separator
+col1, col2, col3, _ = st.columns([1, 1, 1, 5]) # Push flags to the left
+
+with col1:
+    if st.button(LANGS["EN"]["flag"] + " EN"):
+        st.session_state.lang = "EN"
+        st.rerun()
+with col2:
+    if st.button(LANGS["ME"]["flag"] + " ME"):
+        st.session_state.lang = "ME"
+        st.rerun()
+with col3:
+    if st.button(LANGS["RU"]["flag"] + " RU"):
+        st.session_state.lang = "RU"
+        st.rerun()
+
+# --- 7. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
@@ -104,15 +123,14 @@ for doc in buses_ref:
     except:
         continue
 
-# Display Metrics
+# Display Results
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
-    best_eta = all_bus_etas[0]['seconds'] // 60
-    st.metric(f"{txt['next_arr']} {st.session_state.selected_station}", f"{best_eta} {txt['mins']}")
+    st.metric(f"{txt['next_arr']} {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
 else:
     st.warning(txt['no_bus'])
 
-# --- 7. INTERACTIVE MAP ---
+# --- 8. MAP ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -124,10 +142,10 @@ bus_df = pd.DataFrame(all_bus_etas)
 if not bus_df.empty:
     bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
 
-view = pdk.ViewState(latitude=42.4572, longitude=18.5283, zoom=12.5)
+view = pdk.ViewState(latitude=42.4572, longitude=18.5383, zoom=12.5)
 
-s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="station_layer", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
-b_layer = pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
+s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="stops", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
+b_layer = pdk.Layer("IconLayer", data=bus_df, id="buses", get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
 
 map_data = st.pydeck_chart(
     pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
@@ -138,9 +156,9 @@ map_data = st.pydeck_chart(
 
 # Handle Map Selection
 if map_data.selection:
-    objs = map_data.selection.get("objects", {}).get("station_layer")
+    objs = map_data.selection.get("objects", {}).get("stops")
     if objs:
-        new_station = objs[0]["name"]
-        if new_station != st.session_state.selected_station:
-            st.session_state.selected_station = new_station
+        new_pick = objs[0]["name"]
+        if new_pick != st.session_state.selected_station:
+            st.session_state.selected_station = new_pick
             st.rerun()
