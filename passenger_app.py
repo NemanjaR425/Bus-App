@@ -4,6 +4,7 @@ import pydeck as pdk
 import firebase_admin
 from firebase_admin import credentials, firestore
 import googlemaps
+from datetime import datetime
 
 # --- 1. CONFIG & UI ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
@@ -11,17 +12,23 @@ st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    [data-testid="stMetricValue"] { font-size: 28px; color: #1f77b4; }
+    [data-testid="stMetricValue"] { font-size: 28px; color: #1f77b4; font-weight: bold; }
+    .stSelectbox { margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- 2. INITIALIZATION ---
 if not firebase_admin._apps:
-    cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
-    firebase_admin.initialize_app(cred)
+    try:
+        cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error("Firebase Auth Error. Check your secrets.")
+
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
+# Station Database
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -30,51 +37,47 @@ STATIONS = {
     "Zelenika": {"lat": 42.4500, "lon": 18.5750}
 }
 
+# Pre-defined Route Order
 ROUTE_ORDER = ["Igalo (Center)", "Topla", "Main Bus Station (Glavna)", "Meljine", "Zelenika"]
 
 # --- 3. QR / URL PARAMETER LOGIC ---
-# This reads the URL to see if a station was scanned (e.g. ?station=Topla)
 query_params = st.query_params
 url_station = query_params.get("station")
 
-# Determine which station the dropdown should highlight by default
+initial_index = 0
 if url_station in ROUTE_ORDER:
     initial_index = ROUTE_ORDER.index(url_station)
-else:
-    initial_index = 0
 
-# --- 4. MAIN INTERFACE ---
+# --- 4. PASSENGER INTERFACE ---
 st.title("🚌 Herceg Novi Live Bus")
 
-st.subheader("Plan your departure")
-# The dropdown is ALWAYS visible and allows manual selection override
+st.subheader("Where are you waiting?")
 selected_stop = st.selectbox(
-    "Check arrival time for:", 
+    "Select a station to see next arrival:", 
     options=ROUTE_ORDER, 
     index=initial_index,
-    help="Select a station to see how long until the bus arrives there."
+    label_visibility="collapsed"
 )
 
-# Visual confirmation if they scanned a QR code
-if url_station and url_station == selected_stop:
-    st.info(f"📍 QR Scan Detected: Showing times for {url_station}")
+# --- 5. MULTI-BUS LOGIC ---
+# Fetch all buses currently broadcasting on Line 1
+buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 
-# --- 5. DATA & ROUTE-AWARE ETA ---
-bus_ref = db.collection("buses").document("Line_1").get()
+all_bus_etas = []
+target_coords = STATIONS[selected_stop]
 
-if bus_ref.exists:
-    bus_data = bus_ref.to_dict()
-    bus_lat, bus_lon = bus_data['lat'], bus_data['lon']
-    last_seen = bus_data.get('last_updated')
-
-    # Build waypoints for the pre-defined route order
+for doc in buses_ref:
+    bus = doc.to_dict()
+    bus_lat, bus_lon = bus['lat'], bus['lon']
+    
+    # Building the specific route waypoints for this bus to reach the user
     target_idx = ROUTE_ORDER.index(selected_stop)
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
         directions_result = gmaps.directions(
             origin=(bus_lat, bus_lon),
-            destination=(STATIONS[selected_stop]['lat'], STATIONS[selected_stop]['lon']),
+            destination=(target_coords['lat'], target_coords['lon']),
             waypoints=route_waypoints,
             optimize_waypoints=False,
             mode="driving",
@@ -82,40 +85,59 @@ if bus_ref.exists:
         )
         
         if directions_result:
-            total_seconds = sum(leg.get('duration_in_traffic', leg['duration'])['value'] for leg in directions_result[0]['legs'])
-            eta_text = f"{total_seconds // 60} mins"
-        else:
-            eta_text = "Route finding..."
+            # Sum up durations for all segments of the route
+            total_seconds = sum(
+                leg.get('duration_in_traffic', leg['duration'])['value'] 
+                for leg in directions_result[0]['legs']
+            )
+            all_bus_etas.append({
+                "id": bus['bus_id'],
+                "seconds": total_seconds,
+                "lat": bus_lat,
+                "lon": bus_lon,
+                "last_seen": bus['last_updated']
+            })
     except:
-        eta_text = "API Error"
+        continue
 
-    # Metrics Display
+# --- 6. RENDER RESULTS ---
+if all_bus_etas:
+    # Sort by who arrives first
+    all_bus_etas.sort(key=lambda x: x['seconds'])
+    next_bus = all_bus_etas[0]
+    
     m1, m2, m3 = st.columns(3)
-    m1.metric("Line", "Line 1 (Eastbound)")
+    m1.metric("Buses Active", len(all_bus_etas))
     m2.metric("Target Station", selected_stop)
-    m3.metric("Estimated Arrival", eta_text)
+    m3.metric("Next Arrival", f"{next_bus['seconds'] // 60} mins")
 
-    # --- 6. MAP ---
-    view = pdk.ViewState(latitude=bus_lat, longitude=bus_lon, zoom=13)
-    bus_marker = pd.DataFrame([{
-        'lon': bus_lon, 'lat': bus_lat, 
-        'icon_data': {"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}
-    }])
+    # Prepare Map Markers
+    bus_markers = []
+    for b in all_bus_etas:
+        # Use a different color/icon for the absolute next bus
+        icon_url = "https://img.icons8.com/color/48/bus.png" if b['id'] == next_bus['id'] else "https://img.icons8.com/plasticine/48/bus.png"
+        bus_markers.append({
+            'lon': b['lon'], 'lat': b['lat'], 'name': b['id'],
+            'icon_data': {"url": icon_url, "width": 128, "height": 128, "anchorY": 128}
+        })
+
+    view = pdk.ViewState(latitude=42.4531, longitude=18.5375, zoom=12.5)
     
-    st.pydeck_chart(pdk.Deck(
-        layers=[
-            # All stations (Blue)
-            pdk.Layer("ScatterplotLayer", data=pd.DataFrame([{'lat': c['lat'], 'lon': c['lon']} for c in STATIONS.values()]), get_position="[lon, lat]", get_color="[0, 100, 255, 100]", get_radius=100),
-            # Selected station (Red)
-            pdk.Layer("ScatterplotLayer", data=pd.DataFrame([STATIONS[selected_stop]]), get_position="[lon, lat]", get_color="[255, 0, 0, 200]", get_radius=180),
-            # Live Bus
-            pdk.Layer("IconLayer", data=bus_marker, get_position="[lon, lat]", get_icon="icon_data", get_size=4, size_scale=15)
-        ], 
-        initial_view_state=view,
-        tooltip={"text": "Bus Location"}
-    ))
+    layers = [
+        # All Stations
+        pdk.Layer("ScatterplotLayer", data=pd.DataFrame([{'lat': c['lat'], 'lon': c['lon'], 'name': n} for n, c in STATIONS.items()]), get_position="[lon, lat]", get_color="[0, 100, 255, 100]", get_radius=120),
+        # Destination Highlight
+        pdk.Layer("ScatterplotLayer", data=pd.DataFrame([target_coords]), get_position="[lon, lat]", get_color="[255, 0, 0, 200]", get_radius=200),
+        # All Buses
+        pdk.Layer("IconLayer", data=pd.DataFrame(bus_markers), get_position="[lon, lat]", get_icon="icon_data", get_size=4, size_scale=15)
+    ]
     
-    if st.button("Manual Refresh 🔄", use_container_width=True):
+    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, tooltip={"text": "{name}"}))
+    
+    st.caption(f"Showing the closest of {len(all_bus_etas)} active buses. Data refreshes on interaction.")
+    if st.button("Refresh Live Map 🔄", use_container_width=True):
         st.rerun()
 else:
-    st.info("Bus is currently not broadcasting. Please check later.")
+    st.warning("No buses are currently broadcasting on Line 1. Please check the official schedule.")
+    # Show static map of stations anyway
+    st.map(pd.DataFrame([{'lat': c['lat'], 'lon': c['lon']} for c in STATIONS.values()]))
