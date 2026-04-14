@@ -24,15 +24,26 @@ def check_password():
     return True
 
 if check_password():
-    # --- APP INITIALIZATION ---
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
-        firebase_admin.initialize_app(cred)
-    db = firestore.client()
-
     st.title("🆔 Driver Dashboard")
-    bus_id = st.text_input("Enter Bus ID", value="Line_1")
-
+    
+    # Each driver enters a unique ID for their specific vehicle
+    bus_id = st.text_input("Enter Vehicle ID (e.g., HN-BS-001)", value="Bus_1")
+    
+    loc = get_geolocation()
+    if loc:
+        lat, lon = loc['coords']['latitude'], loc['coords']['longitude']
+        st.success(f"GPS Active for {bus_id}")
+        
+        if st.button("🛰️ Broadcast My Location", use_container_width=True):
+            # We save each bus as its own document in the "buses" collection
+            db.collection("active_buses").document(bus_id).set({
+                "bus_id": bus_id,
+                "line": "Line_1",
+                "lat": lat,
+                "lon": lon,
+                "last_updated": datetime.now()
+            })
+            st.toast(f"Broadcasting {bus_id} on Line 1")
     # Grab GPS coordinates from browser
     loc = get_geolocation()
 
