@@ -5,9 +5,41 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import googlemaps
 
-# --- 1. CONFIG & DATA ---
+# --- 1. CONFIG ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
+# --- 2. TRANSLATION DICTIONARY ---
+LANGS = {
+    "🇬🇧 English": {
+        "title": "Herceg Novi Live Bus",
+        "wait_label": "Where are you waiting?",
+        "next_arr": "Next Bus to",
+        "mins": "mins",
+        "no_bus": "No buses currently active on Line 1.",
+        "station_help": "Select a station or tap the map",
+        "refresh": "Refresh Map"
+    },
+    "🇲🇪 Crnogorski": {
+        "title": "Herceg Novi - Autobus Uživo",
+        "wait_label": "Gdje čekate autobus?",
+        "next_arr": "Sledeći autobus za",
+        "mins": "min",
+        "no_bus": "Trenutno nema aktivnih autobusa na Liniji 1.",
+        "station_help": "Izaberite stanicu ili kliknite na mapu",
+        "refresh": "Osvježi mapu"
+    },
+    "🇷🇺 Русский": {
+        "title": "Автобус Герцег-Нови Живьем",
+        "wait_label": "Где вы ждете?",
+        "next_arr": "Следующий автобус до",
+        "mins": "мин",
+        "no_bus": "На Линии 1 сейчас нет активных автобусов.",
+        "station_help": "Выберите станцию или нажмите на карту",
+        "refresh": "Обновить карту"
+    }
+}
+
+# --- 3. DATA & INIT ---
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -17,40 +49,42 @@ STATIONS = {
 }
 ROUTE_ORDER = list(STATIONS.keys())
 
-# --- 2. INIT ---
 if not firebase_admin._apps:
     cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. STATE ENGINE ---
+# --- 4. LANGUAGE & STATION STATE ---
+# Language Selector in Sidebar
+selected_lang_name = st.sidebar.selectbox("Language / Jezik / Язык", list(LANGS.keys()))
+txt = LANGS[selected_lang_name]
+
 if "selected_station" not in st.session_state:
     qp = st.query_params
     st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
-# --- 4. THE DROPDOWN ---
-st.title("🚌 Herceg Novi Live Bus")
+# --- 5. UI ---
+st.title(f"🚌 {txt['title']}")
 
-# We use an 'on_change' callback for the dropdown to make it more responsive
 def handle_dropdown():
     st.session_state.selected_station = st.session_state.manual_choice
 
 selected_stop = st.selectbox(
-    "Where are you waiting?",
+    txt['wait_label'],
     options=ROUTE_ORDER,
     index=ROUTE_ORDER.index(st.session_state.selected_station),
     key="manual_choice",
-    on_change=handle_dropdown
+    on_change=handle_dropdown,
+    help=txt['station_help']
 )
 
-# --- 5. BUS DATA & ETA ---
+# --- 6. ETA LOGIC ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
 for doc in buses_ref:
     bus = doc.to_dict()
-    # Route-aware calculation
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
@@ -73,11 +107,12 @@ for doc in buses_ref:
 # Display Metrics
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
-    st.metric(f"Next Bus to {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} mins")
+    best_eta = all_bus_etas[0]['seconds'] // 60
+    st.metric(f"{txt['next_arr']} {st.session_state.selected_station}", f"{best_eta} {txt['mins']}")
 else:
-    st.warning("No buses currently active.")
+    st.warning(txt['no_bus'])
 
-# --- 6. MAP PREP ---
+# --- 7. INTERACTIVE MAP ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -91,26 +126,8 @@ if not bus_df.empty:
 
 view = pdk.ViewState(latitude=42.4572, longitude=18.5283, zoom=12.5)
 
-# --- 7. THE INTERACTIVE MAP ---
-# Crucial: the 'id' must be unique and stable
-s_layer = pdk.Layer(
-    "ScatterplotLayer", 
-    data=station_df, 
-    id="station_layer", 
-    get_position="[lon, lat]", 
-    get_color="color", 
-    get_radius=180, 
-    pickable=True
-)
-
-b_layer = pdk.Layer(
-    "IconLayer", 
-    data=bus_df, 
-    get_position="[lon, lat]", 
-    get_icon="icon_data", 
-    get_size=5, 
-    size_scale=15
-)
+s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="station_layer", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
+b_layer = pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
 
 map_data = st.pydeck_chart(
     pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
@@ -119,8 +136,7 @@ map_data = st.pydeck_chart(
     key="bus_map"
 )
 
-# --- 8. THE CATCHER (Handle Click) ---
-# If map_data has a selection, we update state and RE-RUN immediately.
+# Handle Map Selection
 if map_data.selection:
     objs = map_data.selection.get("objects", {}).get("station_layer")
     if objs:
