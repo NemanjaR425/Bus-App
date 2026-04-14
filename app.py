@@ -69,6 +69,10 @@ else:
                 destinations=(stat_lat, stat_lon),
                 mode="driving", departure_time="now"
             )
+            # Add these lines to see the real error
+        if matrix:
+            st.write("--- DEBUG INFO ---")
+            st.write(matrix)
             res = matrix['rows'][0]['elements'][0]
             eta_text = res['duration_in_traffic']['text'] if 'duration_in_traffic' in res else res['duration']['text']
         except:
