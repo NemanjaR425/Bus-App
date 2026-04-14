@@ -1,4 +1,4 @@
-streamlit
-firebase-admin
-google-maps-services-python
+streamlit>=1.30.0
+firebase-admin==6.6.0
+google-maps-services-python==5.0.0
 pandas
