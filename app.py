@@ -9,7 +9,7 @@ import googlemaps
 # --- 1. CONFIG & SECRETS ---
 st.set_page_config(page_title="Town Bus Tracker", layout="wide")
 
-# Safe Area CSS Fix for Mobile Devices
+# Safe Area CSS Fix for Mobile
 st.markdown("""
     <style>
     .main .block-container {
@@ -37,6 +37,7 @@ db = firestore.client()
 
 # Initialize Google Maps (Option A: Flat secret)
 try:
+    # Use the key as it appears in your Streamlit Secrets box
     gmaps = googlemaps.Client(key=st.secrets["api_key"])
 except Exception as e:
     st.error(f"Google Maps Key Error: {e}")
@@ -74,10 +75,10 @@ else:
         bus_lat = bus_data['lat']
         bus_lon = bus_data['lon']
         
-        # 2. Station Data (Example: Herceg Novi Main Station)
+        # 2. Station Data (Herceg Novi Main Station)
         station_lat, station_lon = 42.4572, 18.5283 
         
-        # 3. Calculate ETA using Google Maps Distance Matrix
+        # 3. Calculate ETA using Google Maps
         try:
             matrix = gmaps.distance_matrix(
                 origins=(bus_lat, bus_lon),
@@ -91,6 +92,7 @@ else:
                 eta_text = "Route not found"
         except Exception as e:
             eta_text = "ETA Unavailable"
+            # Debugging info in console
             print(f"Maps Error: {e}")
 
         # 4. Display ETA Info
@@ -101,28 +103,29 @@ else:
         # 5. Map View Configuration
         view_state = pdk.ViewState(latitude=bus_lat, longitude=bus_lon, zoom=14)
         
-      # Wrap these in brackets to ensure they are lists
-bus_position_list = [{"lat": bus_lat, "lon": bus_lon}]
-station_position_list = [{"lat": station_lat, "lon": station_lon}]
+        # Data wrapped in lists [] to fix "Unexpected {" errors
+        bus_position = [{"lat": bus_lat, "lon": bus_lon}]
+        station_position = [{"lat": station_lat, "lon": station_lon}]
+        
+        layers = [
+            pdk.Layer(
+                "ScatterplotLayer",
+                data=station_position,
+                get_position="[lon, lat]",
+                get_color="[200, 30, 0, 160]",
+                get_radius=100,
+            ),
+            pdk.Layer(
+                "IconLayer",
+                data=bus_position,
+                get_position="[lon, lat]",
+                get_icon='{"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}',
+                get_size=4,
+                size_scale=15,
+            )
+        ]
 
-layers = [
-    pdk.Layer(
-        "ScatterplotLayer",
-        data=station_position_list,  # Use the list here
-        get_position="[lon, lat]",
-        get_color="[200, 30, 0, 160]",
-        get_radius=100,
-    ),
-    pdk.Layer(
-        "IconLayer",
-        data=bus_position_list,      # Use the list here
-        get_position="[lon, lat]",
-        get_icon='{"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}',
-        get_size=4,
-        size_scale=15,
-    )
-]
-
+        # The following line is correctly indented to align with 'layers' above
         st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view_state))
         
         if st.button("Manual Refresh"):
