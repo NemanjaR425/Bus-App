@@ -31,7 +31,7 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-gmaps = googlemaps.Client(key=st.secrets["google_maps"]["api_key"])
+gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
 # --- 2. APP LOGIC ---
 st.title("🚌 Local Bus Tracker")
