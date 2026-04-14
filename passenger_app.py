@@ -30,30 +30,37 @@ gmaps = googlemaps.Client(key=st.secrets["api_key"])
 query_params = st.query_params
 url_station = query_params.get("station")
 
+# Initialize selected_station
 if "selected_station" not in st.session_state:
     if url_station in ROUTE_ORDER:
         st.session_state.selected_station = url_station
     else:
         st.session_state.selected_station = ROUTE_ORDER[0]
 
-# --- 5. INTERFACE ---
-st.title("🚌 Herceg Novi Live Bus")
+# --- 5. INTERFACE & DYNAMIC SYNC ---
 
+# This handles the manual dropdown change
 def on_dropdown_change():
-    st.session_state.selected_station = st.session_state.dropdown_key
+    # We find the new key because we are using a dynamic key (see below)
+    st.session_state.selected_station = st.session_state.temp_dropdown
 
-# Selectbox linked to session state
+# IMPORTANT: We use a dynamic key "dropdown_{station}" to force the widget to update
+# when the map click changes the session_state.
 selected_stop = st.selectbox(
     "Where are you waiting?",
     options=ROUTE_ORDER,
     index=ROUTE_ORDER.index(st.session_state.selected_station),
-    key="dropdown_key",
-    on_change=on_dropdown_change
+    key=f"dropdown_{st.session_state.selected_station}", 
+    on_change=None # We will handle updates via session state directly
 )
 
-current_station = st.session_state.selected_station
+# Update session state if dropdown was touched
+if selected_stop != st.session_state.selected_station:
+    st.session_state.selected_station = selected_stop
+    st.rerun()
 
 # --- 6. MULTI-BUS & ROUTE-AWARE ETA ---
+# We fetch fresh data from Firebase every rerun
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
@@ -61,13 +68,17 @@ for doc in buses_ref:
     bus = doc.to_dict()
     bus_lat, bus_lon = bus['lat'], bus['lon']
     
-    target_idx = ROUTE_ORDER.index(current_station)
+    # CALCULATE WAYPOINTS based on the CURRENTLY SELECTED station
+    current_target = st.session_state.selected_station
+    target_idx = ROUTE_ORDER.index(current_target)
+    
+    # Build waypoints: only include stops the bus hasn't reached yet on its way to the target
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
         res = gmaps.directions(
             origin=(bus_lat, bus_lon),
-            destination=(STATIONS[current_station]['lat'], STATIONS[current_station]['lon']),
+            destination=(STATIONS[current_target]['lat'], STATIONS[current_target]['lon']),
             waypoints=route_waypoints,
             optimize_waypoints=False,
             mode="driving",
@@ -76,7 +87,7 @@ for doc in buses_ref:
         if res:
             seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
             all_bus_etas.append({"id": bus['bus_id'], "seconds": seconds, "lat": bus_lat, "lon": bus_lon})
-    except:
+    except Exception as e:
         continue
 
 # --- 7. RENDER RESULTS ---
@@ -84,37 +95,21 @@ if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
     next_bus = all_bus_etas[0]
     
-    st.metric(f"Next Bus to {current_station}", f"{next_bus['seconds'] // 60} mins")
+    st.metric(f"Next Bus to {st.session_state.selected_station}", f"{next_bus['seconds'] // 60} mins")
 
-    # Map Data
-    station_markers = pd.DataFrame([{'name': n, 'lat': c['lat'], 'lon': c['lon']} for n, c in STATIONS.items()])
+    # Map Setup
+    station_markers = pd.DataFrame([
+        {'name': n, 'lat': c['lat'], 'lon': c['lon'], 
+         'color': [255, 0, 0, 200] if n == st.session_state.selected_station else [0, 100, 255, 160]} 
+        for n, c in STATIONS.items()
+    ])
+    
     bus_markers = pd.DataFrame([{'lat': b['lat'], 'lon': b['lon'], 'name': b['id']} for b in all_bus_etas])
-
-    # Dynamic Color: Red for selected, Blue for others
-    station_markers['color'] = station_markers['name'].apply(
-        lambda x: [255, 0, 0, 200] if x == current_station else [0, 100, 255, 160]
-    )
 
     view = pdk.ViewState(latitude=42.4572, longitude=18.5283, zoom=12.5)
 
-    s_layer = pdk.Layer(
-        "ScatterplotLayer", 
-        data=station_markers, 
-        id="s-layer", 
-        get_position="[lon, lat]", 
-        get_color="color", 
-        get_radius=150, 
-        pickable=True
-    )
-    
-    b_layer = pdk.Layer(
-        "IconLayer", 
-        data=bus_markers, 
-        get_position="[lon, lat]", 
-        get_icon=lambda x: {"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}, 
-        get_size=4, 
-        size_scale=15
-    )
+    s_layer = pdk.Layer("ScatterplotLayer", data=station_markers, id="s-layer", get_position="[lon, lat]", get_color="color", get_radius=150, pickable=True)
+    b_layer = pdk.Layer("IconLayer", data=bus_markers, get_position="[lon, lat]", get_icon=lambda x: {"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}, get_size=4, size_scale=15)
 
     map_event = st.pydeck_chart(
         pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
@@ -122,12 +117,13 @@ if all_bus_etas:
         selection_mode="single-object"
     )
 
+    # HANDLE MAP CLICKS
     if map_event and map_event.selection:
         selected_objs = map_event.selection.get("objects", {}).get("s-layer")
         if selected_objs:
             clicked_name = selected_objs[0]["name"]
             if clicked_name != st.session_state.selected_station:
                 st.session_state.selected_station = clicked_name
-                st.rerun()
+                st.rerun() # This triggers a full rerun with the new station
 else:
-    st.warning("No buses currently active on Line 1.")
+    st.warning("No buses currently active.")
