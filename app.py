@@ -43,18 +43,19 @@ if mode == "Driver Login":
     st.subheader("Driver Dashboard")
     bus_id = st.text_input("Enter Bus ID", value="Line_1")
     
-    if st.button("Start Broadcasting Location"):
-        st.info("In a real app, we'd use JavaScript geolocation here. For testing, manually set location:")
-        lat = st.number_input("Current Lat", value=42.45, format="%.6f")
-        lon = st.number_input("Current Lon", value=18.53, format="%.6f")
-        
-        if st.button("Update Location"):
-            db.collection("buses").document(bus_id).set({
-                "lat": lat,
-                "lon": lon,
-                "last_updated": datetime.now()
-            })
-            st.success(f"Location updated for {bus_id}!")
+    # We moved the inputs OUTSIDE the "Start Broadcasting" button
+    st.info("Set the coordinates and click update to broadcast.")
+    lat = st.number_input("Current Lat", value=42.45, format="%.6f")
+    lon = st.number_input("Current Lon", value=18.53, format="%.6f")
+    
+    # Now this button will work because it's at the top level of the Driver Mode
+    if st.button("Update Location"):
+        db.collection("buses").document(bus_id).set({
+            "lat": lat,
+            "lon": lon,
+            "last_updated": datetime.now()
+        })
+        st.success(f"Location updated for {bus_id} at {datetime.now().strftime('%H:%M:%S')}!")
 
 else:
     # --- PASSENGER MODE ---
