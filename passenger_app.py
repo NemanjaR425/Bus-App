@@ -80,23 +80,42 @@ if selected_stop != st.session_state.selected_station:
     st.session_state.selected_station = selected_stop
     st.rerun()
 
-# --- 6. FLAG BUTTONS (Direct Selection) ---
-# We create 3 columns to place flags side-by-side
-st.write("---") # Visual separator
-col1, col2, col3, _ = st.columns([1, 1, 1, 5]) # Push flags to the left
+# --- 6. HORIZONTAL FLAG BUTTONS (Mobile Optimized) ---
+st.write("---")
 
-with col1:
-    if st.button(LANGS["EN"]["flag"] + " EN"):
+# CSS to force columns to stay horizontal even on small screens
+st.markdown("""
+    <style>
+    [data-testid="column"] {
+        width: calc(25% - 1rem) !important;
+        flex: 1 1 calc(25% - 1rem) !important;
+        min-width: 60px !important;
+    }
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Create 4 columns (3 for flags, 1 for spacing)
+f1, f2, f3, _ = st.columns([1, 1, 1, 4])
+
+with f1:
+    if st.button(LANGS["EN"]["flag"] + " EN", key="btn_en", use_container_width=True):
         st.session_state.lang = "EN"
         st.rerun()
-with col2:
-    if st.button(LANGS["ME"]["flag"] + " ME"):
+with f2:
+    if st.button(LANGS["ME"]["flag"] + " ME", key="btn_me", use_container_width=True):
         st.session_state.lang = "ME"
         st.rerun()
-with col3:
-    if st.button(LANGS["RU"]["flag"] + " RU"):
+with f3:
+    if st.button(LANGS["RU"]["flag"] + " RU", key="btn_ru", use_container_width=True):
         st.session_state.lang = "RU"
         st.rerun()
+
+st.write("") # Small spacer
 
 # --- 7. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
