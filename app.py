@@ -35,9 +35,8 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# Initialize Google Maps (Option A: Flat secret)
+# Initialize Google Maps
 try:
-    # Use the key as it appears in your Streamlit Secrets box
     gmaps = googlemaps.Client(key=st.secrets["api_key"])
 except Exception as e:
     st.error(f"Google Maps Key Error: {e}")
@@ -45,17 +44,15 @@ except Exception as e:
 # --- 2. APP LOGIC ---
 st.title("🚌 Local Bus Tracker")
 
-# Sidebar for switching modes
 mode = st.sidebar.radio("Choose Mode", ["Passenger", "Driver Login"])
 
 if mode == "Driver Login":
     st.subheader("Driver Dashboard")
     bus_id = st.text_input("Enter Bus ID", value="Line_1")
     
-    st.info("Set the coordinates and click update to broadcast.")
-    # Default coordinates for Herceg Novi area
-    lat = st.number_input("Current Lat", value=42.450000, format="%.6f")
-    lon = st.number_input("Current Lon", value=18.530000, format="%.6f")
+    st.info("Set coordinates (try 42.4511, 18.5255 for a real Herceg Novi test) and click update.")
+    lat = st.number_input("Current Lat", value=42.451100, format="%.6f")
+    lon = st.number_input("Current Lon", value=18.525500, format="%.6f")
     
     if st.button("Update Location"):
         db.collection("buses").document(bus_id).set({
@@ -67,68 +64,71 @@ if mode == "Driver Login":
 
 else:
     # --- PASSENGER MODE ---
-    # 1. Fetch Bus Location from Firestore
     bus_ref = db.collection("buses").document("Line_1").get()
     
     if bus_ref.exists:
         bus_data = bus_ref.to_dict()
-        bus_lat = bus_data['lat']
-        bus_lon = bus_data['lon']
+        bus_lat, bus_lon = bus_data['lat'], bus_data['lon']
         
-        # 2. Station Data (Herceg Novi Main Station)
-        station_lat, station_lon = 42.4572, 18.5283 
+        # Station: Herceg Novi Main Bus Station
+        stat_lat, stat_lon = 42.4572, 18.5283 
         
-        # 3. Calculate ETA using Google Maps
+        # 3. Calculate ETA
+        eta_text = "Calculating..."
         try:
             matrix = gmaps.distance_matrix(
                 origins=(bus_lat, bus_lon),
-                destinations=(station_lat, station_lon),
+                destinations=(stat_lat, stat_lon),
                 mode="driving",
                 departure_time="now"
             )
             if matrix['rows'][0]['elements'][0]['status'] == 'OK':
                 eta_text = matrix['rows'][0]['elements'][0]['duration_in_traffic']['text']
             else:
-                eta_text = "Route not found"
+                # This helps you see if the coordinates are the problem
+                reason = matrix['rows'][0]['elements'][0]['status']
+                eta_text = f"Unavailable ({reason})"
         except Exception as e:
-            eta_text = "ETA Unavailable"
-            # Debugging info in console
-            print(f"Maps Error: {e}")
+            eta_text = "Check API/Billing"
 
-        # 4. Display ETA Info
-        col1, col2 = st.columns(2)
-        col1.metric("Next Bus", "Line 1")
-        col2.metric("Estimated Arrival", eta_text)
+        # 4. Display UI
+        c1, c2 = st.columns(2)
+        c1.metric("Next Bus", "Line 1")
+        c2.metric("Estimated Arrival", eta_text)
 
-        # 5. Map View Configuration
+        # 5. Map Fix: Using DataFrames avoids the "Unexpected {" character error
+        bus_df = pd.DataFrame([{'lat': bus_lat, 'lon': bus_lon, 'name': 'Bus'}])
+        stat_df = pd.DataFrame([{'lat': stat_lat, 'lon': stat_lon, 'name': 'Station'}])
+
         view_state = pdk.ViewState(latitude=bus_lat, longitude=bus_lon, zoom=14)
-        
-        # Data wrapped in lists [] to fix "Unexpected {" errors
-        bus_position = [{"lat": bus_lat, "lon": bus_lon}]
-        station_position = [{"lat": station_lat, "lon": station_lon}]
         
         layers = [
             pdk.Layer(
                 "ScatterplotLayer",
-                data=station_position,
+                data=stat_df,
                 get_position="[lon, lat]",
                 get_color="[200, 30, 0, 160]",
                 get_radius=100,
             ),
             pdk.Layer(
                 "IconLayer",
-                data=bus_position,
+                data=bus_df,
                 get_position="[lon, lat]",
-                get_icon='{"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}',
+                # Direct link to icon without complex JSON string to prevent parsing errors
+                get_icon='''{
+                    "url": "https://img.icons8.com/color/48/bus.png",
+                    "width": 128,
+                    "height": 128,
+                    "anchorY": 128
+                }''',
                 get_size=4,
                 size_scale=15,
             )
         ]
 
-        # The following line is correctly indented to align with 'layers' above
         st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view_state))
         
-        if st.button("Manual Refresh"):
+        if st.button("Refresh Map"):
             st.rerun()
     else:
-        st.warning("Waiting for live bus data... Please update location in Driver Mode first.")
+        st.warning("No live bus data. Please use Driver Mode to start broadcasting.")
