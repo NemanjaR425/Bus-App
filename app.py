@@ -1,8 +1,11 @@
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
-from firebase_admin import firestore
-
+from firebase_admin import credentials, firestore
+# Then initialize (only if not already initialized)
+if not firebase_admin._apps:
+    cred = credentials.Certificate(st.secrets["gcp_service_account"])
+    firebase_admin.initialize_app(cred)
 # 1. Pull the latest coordinates from your database
 db = firestore.client()
 bus_ref = db.collection("buses").document("bus_01")
