@@ -23,7 +23,7 @@ st.markdown("""
         }
     }
     </style>
-    """, unsafe_allow_index=True)
+    """, unsafe_allow_html=True)
 
 # Initialize Firebase
 if not firebase_admin._apps:
