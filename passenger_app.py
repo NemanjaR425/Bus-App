@@ -24,33 +24,33 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. THE STATE ENGINE (CRITICAL ORDER) ---
+# --- 3. STATE ENGINE ---
 if "selected_station" not in st.session_state:
     qp = st.query_params
     st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
-# --- 4. UI: THE DROPDOWN ---
+# --- 4. THE DROPDOWN ---
 st.title("🚌 Herceg Novi Live Bus")
 
-# We use the 'key' to allow manual changes to update state immediately
+# We use an 'on_change' callback for the dropdown to make it more responsive
+def handle_dropdown():
+    st.session_state.selected_station = st.session_state.manual_choice
+
 selected_stop = st.selectbox(
     "Where are you waiting?",
     options=ROUTE_ORDER,
     index=ROUTE_ORDER.index(st.session_state.selected_station),
-    key="station_selector"
+    key="manual_choice",
+    on_change=handle_dropdown
 )
 
-# If dropdown changes, update the 'source of truth'
-if selected_stop != st.session_state.selected_station:
-    st.session_state.selected_station = selected_stop
-    st.rerun()
-
-# --- 5. DATA FETCHING & ETA ---
+# --- 5. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
 for doc in buses_ref:
     bus = doc.to_dict()
+    # Route-aware calculation
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
@@ -70,14 +70,14 @@ for doc in buses_ref:
     except:
         continue
 
-# Display Metric
+# Display Metrics
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
     st.metric(f"Next Bus to {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} mins")
 else:
-    st.warning("No buses active.")
+    st.warning("No buses currently active.")
 
-# --- 6. THE MAP ---
+# --- 6. MAP PREP ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -91,23 +91,40 @@ if not bus_df.empty:
 
 view = pdk.ViewState(latitude=42.4572, longitude=18.5283, zoom=12.5)
 
-# Layer definitions
-s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="stops", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
-b_layer = pdk.Layer("IconLayer", data=bus_df, id="buses", get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
+# --- 7. THE INTERACTIVE MAP ---
+# Crucial: the 'id' must be unique and stable
+s_layer = pdk.Layer(
+    "ScatterplotLayer", 
+    data=station_df, 
+    id="station_layer", 
+    get_position="[lon, lat]", 
+    get_color="color", 
+    get_radius=180, 
+    pickable=True
+)
 
-# Render Map
+b_layer = pdk.Layer(
+    "IconLayer", 
+    data=bus_df, 
+    get_position="[lon, lat]", 
+    get_icon="icon_data", 
+    get_size=5, 
+    size_scale=15
+)
+
 map_data = st.pydeck_chart(
     pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
     on_select="rerun",
-    selection_mode="single-object"
+    selection_mode="single-object",
+    key="bus_map"
 )
 
-# --- 7. HANDLE MAP CLICK (AT THE END) ---
-if map_data and map_data.selection:
-    # Check specifically for our 'stops' layer
-    selected_objs = map_data.selection.get("objects", {}).get("stops")
-    if selected_objs:
-        new_pick = selected_objs[0]["name"]
-        if new_pick != st.session_state.selected_station:
-            st.session_state.selected_station = new_pick
+# --- 8. THE CATCHER (Handle Click) ---
+# If map_data has a selection, we update state and RE-RUN immediately.
+if map_data.selection:
+    objs = map_data.selection.get("objects", {}).get("station_layer")
+    if objs:
+        new_station = objs[0]["name"]
+        if new_station != st.session_state.selected_station:
+            st.session_state.selected_station = new_station
             st.rerun()
