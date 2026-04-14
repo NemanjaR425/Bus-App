@@ -1,5 +1,5 @@
 import streamlit as st
-import pd as pd
+import pandas as pd
 import pydeck as pdk
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -30,7 +30,6 @@ gmaps = googlemaps.Client(key=st.secrets["api_key"])
 query_params = st.query_params
 url_station = query_params.get("station")
 
-# Initialize the selection in session state if it doesn't exist
 if "selected_station" not in st.session_state:
     if url_station in ROUTE_ORDER:
         st.session_state.selected_station = url_station
@@ -40,11 +39,10 @@ if "selected_station" not in st.session_state:
 # --- 5. INTERFACE ---
 st.title("🚌 Herceg Novi Live Bus")
 
-# Callback function to update session state when dropdown is used manually
 def on_dropdown_change():
     st.session_state.selected_station = st.session_state.dropdown_key
 
-# The Selectbox: Use 'key' to link it to session state
+# Selectbox linked to session state
 selected_stop = st.selectbox(
     "Where are you waiting?",
     options=ROUTE_ORDER,
@@ -53,7 +51,6 @@ selected_stop = st.selectbox(
     on_change=on_dropdown_change
 )
 
-# Sync the local variable with session state
 current_station = st.session_state.selected_station
 
 # --- 6. MULTI-BUS & ROUTE-AWARE ETA ---
@@ -64,7 +61,6 @@ for doc in buses_ref:
     bus = doc.to_dict()
     bus_lat, bus_lon = bus['lat'], bus['lon']
     
-    # Calculate waypoints up to the CURRENTLY SELECTED station
     target_idx = ROUTE_ORDER.index(current_station)
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
@@ -94,7 +90,7 @@ if all_bus_etas:
     station_markers = pd.DataFrame([{'name': n, 'lat': c['lat'], 'lon': c['lon']} for n, c in STATIONS.items()])
     bus_markers = pd.DataFrame([{'lat': b['lat'], 'lon': b['lon'], 'name': b['id']} for b in all_bus_etas])
 
-    # Highlight the selected station in Red, others in Blue
+    # Dynamic Color: Red for selected, Blue for others
     station_markers['color'] = station_markers['name'].apply(
         lambda x: [255, 0, 0, 200] if x == current_station else [0, 100, 255, 160]
     )
@@ -126,7 +122,6 @@ if all_bus_etas:
         selection_mode="single-object"
     )
 
-    # Handle Map Clicks: If user clicks a dot, update session state and refresh
     if map_event and map_event.selection:
         selected_objs = map_event.selection.get("objects", {}).get("s-layer")
         if selected_objs:
