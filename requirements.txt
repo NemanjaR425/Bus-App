@@ -2,3 +2,4 @@ streamlit
 firebase-admin
 googlemaps
 pandas
+streamlit-js-eval
