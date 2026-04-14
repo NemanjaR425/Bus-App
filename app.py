@@ -66,12 +66,6 @@ else:
                 destinations=(stat_lat, stat_lon),
                 mode="driving", departure_time="now"
             )
-            
-            # --- DEBUG BLOCK ---
-            # This will show the raw Google response on your app screen
-            with st.expander("🔍 Click to see Google API Debug Info"):
-                st.write(matrix)
-            # ------------------
 
             res = matrix['rows'][0]['elements'][0]
             if res['status'] == 'OK':
