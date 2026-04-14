@@ -101,27 +101,27 @@ else:
         # 5. Map View Configuration
         view_state = pdk.ViewState(latitude=bus_lat, longitude=bus_lon, zoom=14)
         
-        # Data wrapped in lists [] to prevent "Unexpected {" errors
-        bus_position = [{"lat": bus_lat, "lon": bus_lon}]
-        station_position = [{"lat": station_lat, "lon": station_lon}]
-        
-        layers = [
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=station_position,
-                get_position="[lon, lat]",
-                get_color="[200, 30, 0, 160]",
-                get_radius=100,
-            ),
-            pdk.Layer(
-                "IconLayer",
-                data=bus_position,
-                get_position="[lon, lat]",
-                get_icon='{"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}',
-                get_size=4,
-                size_scale=15,
-            )
-        ]
+      # Wrap these in brackets to ensure they are lists
+bus_position_list = [{"lat": bus_lat, "lon": bus_lon}]
+station_position_list = [{"lat": station_lat, "lon": station_lon}]
+
+layers = [
+    pdk.Layer(
+        "ScatterplotLayer",
+        data=station_position_list,  # Use the list here
+        get_position="[lon, lat]",
+        get_color="[200, 30, 0, 160]",
+        get_radius=100,
+    ),
+    pdk.Layer(
+        "IconLayer",
+        data=bus_position_list,      # Use the list here
+        get_position="[lon, lat]",
+        get_icon='{"url": "https://img.icons8.com/color/48/bus.png", "width": 128, "height": 128, "anchorY": 128}',
+        get_size=4,
+        size_scale=15,
+    )
+]
 
         st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view_state))
         
