@@ -43,8 +43,7 @@ selected_stop = st.selectbox(
     on_change=handle_dropdown
 )
 
-# --- 5. BUS DATA & ETA CALCULATION ---
-# We run this before the map to ensure metrics show even if the map crashes
+# --- 5. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
@@ -52,7 +51,6 @@ for doc in buses_ref:
     bus = doc.to_dict()
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
-    # Waypoints for the local route
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
@@ -66,12 +64,7 @@ for doc in buses_ref:
         )
         if res:
             seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
-            all_bus_etas.append({
-                "id": bus.get('bus_id'), 
-                "seconds": seconds, 
-                "lat": bus['lat'], 
-                "lon": bus['lon']
-            })
+            all_bus_etas.append({"id": bus.get('bus_id'), "seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
     except:
         continue
 
@@ -82,7 +75,7 @@ if all_bus_etas:
 else:
     st.warning("No buses currently active on Line 1.")
 
-# --- 6. MAP LAYERS PREP ---
+# --- 6. MAP LAYERS ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -102,47 +95,35 @@ layers = [
     )
 ]
 
-# Only build IconLayer if there are active buses to prevent JSON errors
 if all_bus_etas:
     bus_df = pd.DataFrame(all_bus_etas)
-    bus_df['icon_data'] = [
-        {"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} 
-        for _ in range(len(bus_df))
-    ]
-    
-    layers.append(pdk.Layer(
-        "IconLayer", 
-        data=bus_df, 
-        get_position="[lon, lat]", 
-        get_icon="icon_data", 
-        get_size=5, 
-        size_scale=15
-    ))
+    bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
+    layers.append(pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15))
 
-# --- 7. THE BRIGHT INTERACTIVE MAP ---
+# --- 7. THE BRIGHT MAP FIX ---
 view = pdk.ViewState(
     latitude=STATIONS[st.session_state.selected_station]["lat"], 
     longitude=STATIONS[st.session_state.selected_station]["lon"], 
     zoom=13
 )
 
-map_data = None # Pre-initialize to avoid NameError
+map_data = None 
 
 try:
+    # We use 'light' style as it is the most stable bright option
     map_data = st.pydeck_chart(
         pdk.Deck(
             layers=layers, 
             initial_view_state=view, 
             tooltip={"text": "{name}"},
-            # Map style set to bright 'streets'
-            map_style="mapbox://styles/mapbox/streets-v11" 
+            map_style="light" # Simplified style name to bypass some token issues
         ),
         on_select="rerun",
         selection_mode="single-object",
         key="bus_map"
     )
 except Exception as e:
-    st.error("Map loading issue. Live ETA above is still active.")
+    st.error("Map tiles could not load. Check your Mapbox Token.")
 
 # --- 8. CLICK HANDLER ---
 if map_data is not None and map_data.selection:
