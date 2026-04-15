@@ -20,7 +20,7 @@ ROUTE_ORDER = list(STATIONS.keys())
 LANGS = {
     "EN": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active."},
     "ME": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa."},
-    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных autobusa."}
+    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов."}
 }
 
 # --- 2. INITIALIZATION ---
@@ -48,34 +48,33 @@ st.selectbox(txt['wait'], options=ROUTE_ORDER,
              index=ROUTE_ORDER.index(st.session_state.selected_station), 
              key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. THE "FORCED ROW" LANGUAGE BAR ---
+# --- 5. THE "FIXED WIDTH" LANGUAGE BAR ---
 st.write("---")
 
-# This CSS targets every level of the Streamlit column structure to force a horizontal row
 st.markdown("""
     <style>
-    /* Force the parent container to be a row and NEVER wrap */
+    /* FORCE the horizontal container to NOT expand */
     [data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        align-items: center !important;
         justify-content: flex-start !important;
         gap: 10px !important;
+        width: fit-content !important; /* This stops the spreading */
     }
     
-    /* Ensure individual columns don't grow or stack */
+    /* FORCE the columns to be exactly 70px wide - no more, no less */
     [data-testid="column"] {
-        width: fit-content !important;
-        flex: unset !important;
-        min-width: unset !important;
+        width: 70px !important;
+        flex: none !important;
+        min-width: 70px !important;
     }
 
     /* Style buttons into circles */
     .stButton > button {
         border-radius: 50% !important;
-        width: 60px !important;
-        height: 60px !important;
+        width: 62px !important;
+        height: 62px !important;
         padding: 0px !important;
         font-weight: bold !important;
         font-size: 13px !important;
@@ -83,10 +82,8 @@ st.markdown("""
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        transition: 0.2s;
     }
 
-    /* Selection Highlight */
     .stButton > button[kind="primary"] {
         background-color: #4CAF50 !important;
         color: white !important;
@@ -94,8 +91,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Using columns now because the CSS above "breaks" Streamlit's responsive stacking
-c1, c2, c3, _ = st.columns([1, 1, 1, 10])
+# Using a standard column layout, but our CSS above will shrink them
+c1, c2, c3 = st.columns(3)
 
 with c1:
     if st.button("MNE", key="me", type="primary" if st.session_state.lang == "ME" else "secondary"):
@@ -118,7 +115,7 @@ for doc in buses_ref:
     bus = doc.to_dict()
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
-    # Using local coastal waypoints for the Boka region
+    # Using local waypoints for the Boka region route logic
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
