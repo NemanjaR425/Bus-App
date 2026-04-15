@@ -80,21 +80,54 @@ if selected_stop != st.session_state.selected_station:
     st.session_state.selected_station = selected_stop
     st.rerun()
 
-# --- 6. HORIZONTAL FLAG BUTTONS (Mobile Optimized) ---
+# --- 6. HORIZONTAL FLAG SELECTOR (Image Edition) ---
 st.write("---")
 
-# CSS to force columns to stay horizontal even on small screens
+# URLs for Flaticon icons (using standard 64px versions)
+icon_urls = {
+    "EN": "https://cdn-icons-png.flaticon.com/512/197/197374.png", # UK
+    "ME": "https://cdn-icons-png.flaticon.com/512/3054/3054045.png", # Montenegro
+    "RU": "https://cdn-icons-png.flaticon.com/512/197/197403.png"  # Russia
+}
+
+# Use HTML columns to force horizontal layout on mobile
+# We use st.columns with clickable images (via HTML)
+cols = st.columns([1, 1, 1, 4])
+
+for i, (lang_code, img_url) in enumerate(icon_urls.items()):
+    with cols[i]:
+        # Styling the image to look like a button
+        # If it's the selected language, we add a border/shadow
+        is_selected = st.session_state.lang == lang_code
+        border_style = "border: 3px solid #1f77b4; box-shadow: 0px 0px 10px rgba(0,0,0,0.2);" if is_selected else "border: 1px solid #ddd;"
+        
+        # We use a button with an image inside or just a button with the flag emoji 
+        # but since we want the Flaticon look, we'll use st.image + st.button logic:
+        st.image(img_url, width=45)
+        if st.button(f"Set {lang_code}", key=f"lang_{lang_code}", help=f"Switch to {lang_code}", use_container_width=True):
+            st.session_state.lang = lang_code
+            st.rerun()
+
 st.markdown("""
     <style>
+    /* Force columns to stay side-by-side on mobile */
     [data-testid="column"] {
-        width: calc(25% - 1rem) !important;
-        flex: 1 1 calc(25% - 1rem) !important;
-        min-width: 60px !important;
+        width: 15% !important;
+        flex: 1 1 15% !important;
+        min-width: 50px !important;
+        text-align: center;
     }
     div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         display: flex !important;
         flex-wrap: nowrap !important;
+        align-items: center;
+    }
+    /* Hide the button text so only the icon matters, or keep it for clarity */
+    .stButton>button {
+        font-size: 10px;
+        padding: 0px;
+        height: 25px;
     }
     </style>
     """, unsafe_allow_html=True)
