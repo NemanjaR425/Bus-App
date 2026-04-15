@@ -76,58 +76,74 @@ selected_stop = st.selectbox(
     on_change=handle_dropdown
 )
 
-# --- 5. ROUND LANGUAGE BUTTONS (Tight Spacing) ---
+# --- 5. ROUND LANGUAGE BAR (Optimized for Mobile) ---
+st.write("---")
+
+# Custom CSS to turn the radio group into horizontal round buttons
 st.markdown("""
     <style>
-    /* Force columns to stay tight and horizontal */
-    div[data-testid="stHorizontalBlock"] {
+    /* Hide the default radio label */
+    div[data-testid="stRadio"] > label {
+        display: none;
+    }
+    /* Force the radio options to be horizontal and tight */
+    div[data-testid="stWidgetLabel"] {
+        display: none;
+    }
+    div[data-role="radiogroup"] {
         flex-direction: row !important;
-        display: flex !important;
-        flex-wrap: nowrap !important;
-        justify-content: flex-start !important;
-        gap: 10px !important; /* Tightens the gap between buttons */
+        gap: 10px !important;
     }
-    [data-testid="column"] {
-        width: 65px !important;
-        flex: 0 0 65px !important;
-        min-width: 65px !important;
-        padding: 0px !important; /* Removes default column padding */
-    }
-    /* Round Button Styling */
-    .stButton > button {
-        border-radius: 50% !important;
-        width: 60px !important;
-        height: 60px !important;
-        padding: 0px !important;
-        font-weight: bold !important;
+    /* Style each individual 'button' */
+    div[data-role="radiogroup"] label {
+        background-color: #262730; /* Dark background */
+        border: 2px solid #4CAF50;
+        border-radius: 50% !important; /* Circular */
+        width: 55px !important;
+        height: 55px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
+        padding: 0px !important;
+        cursor: pointer;
         transition: 0.3s;
+    }
+    /* Style for when a language is selected */
+    div[data-role="radiogroup"] label[data-baseweb="radio"] > div:first-child {
+        display: none !important; /* Hide the little radio circle */
+    }
+    div[data-role="radiogroup"] label:has(input:checked) {
+        background-color: #4CAF50 !important;
+        color: white !important;
+        box-shadow: 0px 0px 10px rgba(76, 175, 80, 0.5);
+    }
+    /* Center the text inside the circle */
+    div[data-role="radiogroup"] div[data-testid="stMarkdownContainer"] p {
+        font-weight: bold !important;
+        font-size: 14px !important;
+        margin: 0px !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# Using a small container to help keep them grouped
-with st.container():
-    c1, c2, c3, _ = st.columns([1, 1, 1, 10]) # The '10' pushes empty space to the right
+# The Selector Logic
+# We use a horizontal radio group that acts like buttons
+lang_options = ["MNE", "EN", "Ру"]
+lang_map = {"MNE": "ME", "EN": "EN", "Ру": "RU"}
+inv_lang_map = {v: k for k, v in lang_map.items()}
 
-    with c1:
-        # If active, make the border thicker/different color
-        me_style = "primary" if st.session_state.lang == "ME" else "secondary"
-        if st.button(LANGS["ME"]["label"], key="btn_me", type=me_style):
-            st.session_state.lang = "ME"
-            st.rerun()
-    with c2:
-        en_style = "primary" if st.session_state.lang == "EN" else "secondary"
-        if st.button(LANGS["EN"]["label"], key="btn_en", type=en_style):
-            st.session_state.lang = "EN"
-            st.rerun()
-    with c3:
-        ru_style = "primary" if st.session_state.lang == "RU" else "secondary"
-        if st.button(LANGS["RU"]["label"], key="btn_ru", type=ru_style):
-            st.session_state.lang = "RU"
-            st.rerun()
+selected_lang_label = st.radio(
+    "Lang",
+    options=lang_options,
+    index=lang_options.index(inv_lang_map[st.session_state.lang]),
+    horizontal=True,
+    label_visibility="collapsed"
+)
+
+# Update session state if selection changes
+if lang_map[selected_lang_label] != st.session_state.lang:
+    st.session_state.lang = lang_map[selected_lang_label]
+    st.rerun()
 
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
