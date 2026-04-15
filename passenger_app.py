@@ -5,41 +5,15 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import googlemaps
 
-# --- 1. CONFIG ---
+# --- 1. CONFIG & INIT ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
-# --- 2. TRANSLATION DICTIONARY ---
-LANGS = {
-    "🇬🇧 English": {
-        "title": "Herceg Novi Live Bus",
-        "wait_label": "Where are you waiting?",
-        "next_arr": "Next Bus to",
-        "mins": "mins",
-        "no_bus": "No buses currently active on Line 1.",
-        "station_help": "Select a station or tap the map",
-        "refresh": "Refresh Map"
-    },
-    "🇲🇪 Crnogorski": {
-        "title": "Herceg Novi - Autobus Uživo",
-        "wait_label": "Gdje čekate autobus?",
-        "next_arr": "Sledeći autobus za",
-        "mins": "min",
-        "no_bus": "Trenutno nema aktivnih autobusa na Liniji 1.",
-        "station_help": "Izaberite stanicu ili kliknite na mapu",
-        "refresh": "Osvježi mapu"
-    },
-    "🇷🇺 Русский": {
-        "title": "Автобус Герцег-Нови Живьем",
-        "wait_label": "Где вы ждете?",
-        "next_arr": "Следующий автобус до",
-        "mins": "мин",
-        "no_bus": "На Линии 1 сейчас нет активных автобусов.",
-        "station_help": "Выберите станцию или нажмите на карту",
-        "refresh": "Обновить карту"
-    }
-}
+if not firebase_admin._apps:
+    cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
+    firebase_admin.initialize_app(cred)
+db = firestore.client()
+gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. DATA & INIT ---
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -49,20 +23,90 @@ STATIONS = {
 }
 ROUTE_ORDER = list(STATIONS.keys())
 
-if not firebase_admin._apps:
-    cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
-    firebase_admin.initialize_app(cred)
-db = firestore.client()
-gmaps = googlemaps.Client(key=st.secrets["api_key"])
-
-# --- 4. LANGUAGE & STATION STATE ---
-# Language Selector in Sidebar
-selected_lang_name = st.sidebar.selectbox("Language / Jezik / Язык", list(LANGS.keys()))
-txt = LANGS[selected_lang_name]
+# --- 2. UI: HEADER & SELECTION ---
+st.title("🚌 Herceg Novi Live Bus")
 
 if "selected_station" not in st.session_state:
-    qp = st.query_params
-    st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
+    st.session_state.selected_station = ROUTE_ORDER[0]
+
+selected_stop = st.selectbox(
+    "Where are you waiting?",
+    options=ROUTE_ORDER,
+    index=ROUTE_ORDER.index(st.session_state.selected_station),
+    key="station_choice"
+)
+st.session_state.selected_station = selected_stop
+
+# --- 3. DATA FETCHING & ETA (RUN THIS BEFORE THE MAP) ---
+all_bus_etas = []
+try:
+    buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
+    for doc in buses_ref:
+        bus = doc.to_dict()
+        res = gmaps.directions(
+            origin=(bus['lat'], bus['lon']),
+            destination=(STATIONS[selected_stop]['lat'], STATIONS[selected_stop]['lon']),
+            mode="driving", departure_time="now"
+        )
+        if res:
+            seconds = res[0]['legs'][0].get('duration_in_traffic', res[0]['legs'][0]['duration'])['value']
+            all_bus_etas.append({"seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
+except Exception as e:
+    st.error("Error connecting to live data.")
+
+# Display ETA Metrics immediately
+if all_bus_etas:
+    all_bus_etas.sort(key=lambda x: x['seconds'])
+    st.metric(f"Next Bus to {selected_stop}", f"{all_bus_etas[0]['seconds'] // 60} mins")
+else:
+    st.warning("No active buses on Line 1.")
+
+# --- 4. THE MAP (ERROR-PROOFED) ---
+station_df = pd.DataFrame([
+    {
+        'name': n, 'lat': c['lat'], 'lon': c['lon'], 
+        'color': [255, 0, 0, 255] if n == selected_stop else [0, 100, 255, 160]
+    } for n, c in STATIONS.items()
+])
+
+# Create the station layer (Safe data)
+layers = [
+    pdk.Layer(
+        "ScatterplotLayer", 
+        data=station_df, 
+        get_position="[lon, lat]", 
+        get_color="color", 
+        get_radius=180
+    )
+]
+
+# Only add the icon layer if data is valid to prevent "Unexpected {" crash
+if all_bus_etas:
+    bus_df = pd.DataFrame(all_bus_etas)
+    # Ensure URL is wrapped in a string correctly
+    bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
+    
+    layers.append(pdk.Layer(
+        "IconLayer",
+        data=bus_df,
+        get_position="[lon, lat]",
+        get_icon="icon_data",
+        get_size=4,
+        size_scale=15
+    ))
+
+try:
+    st.pydeck_chart(pdk.Deck(
+        layers=layers,
+        initial_view_state=pdk.ViewState(
+            latitude=STATIONS[selected_stop]['lat'],
+            longitude=STATIONS[selected_stop]['lon'],
+            zoom=13
+        ),
+        map_style="mapbox://styles/mapbox/dark-v10"
+    ))
+except Exception as map_err:
+    st.error("Map is temporarily unavailable, but ETA above is live.")
 
 # --- 5. UI ---
 st.title(f"🚌 {txt['title']}")
