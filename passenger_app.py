@@ -1,13 +1,31 @@
 import streamlit as st
-import pandas as pd  # FIXED: Added to prevent the NameError in your screenshot
+import pandas as pd
 import pydeck as pdk
 import firebase_admin
 from firebase_admin import credentials, firestore
 import googlemaps
 
-# --- 1. CONFIG & DATA ---
+# --- 1. CONFIG ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
+# CSS to make the radio buttons look more like actual buttons
+st.markdown("""
+    <style>
+    /* Force the radio group to stay tight */
+    div[data-testid="stWidgetLabel"] {
+        display: none;
+    }
+    div[data-testid="stHorizontalBlock"] {
+        gap: 0px !important;
+    }
+    /* Simple styling to make the radio options look cleaner */
+    div.stStandard {
+        padding-top: 1rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 2. DATA & STATIONS ---
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -18,119 +36,114 @@ STATIONS = {
 ROUTE_ORDER = list(STATIONS.keys())
 
 LANGS = {
-    "EN": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active."},
-    "ME": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa."},
-    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов."}
+    "English": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active.", "code": "EN"},
+    "Crnogorski": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa.", "code": "ME"},
+    "Русский": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов.", "code": "RU"}
 }
 
-# --- 2. INITIALIZATION ---
+# --- 3. INITIALIZATION ---
 if not firebase_admin._apps:
-    # Using the credentials you've set up for the Boka region tracker
     cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. STATE ---
-if "lang" not in st.session_state:
-    st.session_state.lang = "EN"
-if "selected_station" not in st.session_state:
-    st.session_state.selected_station = ROUTE_ORDER[0]
+# --- 4. LANGUAGE SELECTOR (The "Safe" Way) ---
+# This uses standard Streamlit radio buttons set to horizontal.
+# It is guaranteed to stay in one row on mobile.
+selected_lang_name = st.radio(
+    "Language",
+    options=list(LANGS.keys()),
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
-txt = LANGS[st.session_state.lang]
+txt = LANGS[selected_lang_name]
 
-# --- 4. UI: TITLE & SELECTOR ---
+# --- 5. UI: MAIN CONTENT ---
 st.title(f"🚌 {txt['title']}")
 
-def handle_dropdown():
-    st.session_state.selected_station = st.session_state.manual_choice
+# Station selection
+selected_station = st.selectbox(
+    txt['wait'], 
+    options=ROUTE_ORDER,
+    index=0
+)
 
-st.selectbox(txt['wait'], options=ROUTE_ORDER, 
-             index=ROUTE_ORDER.index(st.session_state.selected_station), 
-             key="manual_choice", on_change=handle_dropdown)
-
-# --- 5. THE "NON-STACKING" LANGUAGE BAR ---
 st.write("---")
 
-st.markdown("""
-    <style>
-    /* FORCE THE ROW: This stops Streamlit from stacking on mobile */
-    div[data-testid="stHorizontalBlock"] {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        justify-content: flex-start !important;
-        gap: 10px !important;
-    }
-    
-    /* FORCE COLUMN WIDTH: Prevents them from stretching to full width */
-    div[data-testid="column"] {
-        width: fit-content !important;
-        flex: unset !important;
-        min-width: unset !important;
-    }
-
-    /* CIRCLE BUTTONS: Consistent with your previous design */
-    .stButton > button {
-        border-radius: 50% !important;
-        width: 60px !important;
-        height: 60px !important;
-        padding: 0px !important;
-        font-weight: bold !important;
-        border: 2px solid #4CAF50 !important;
-    }
-
-    .stButton > button[kind="primary"] {
-        background-color: #4CAF50 !important;
-        color: white !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Using columns, but the CSS above will "freeze" them in a row
-c1, c2, c3, _ = st.columns([1, 1, 1, 5])
-
-with c1:
-    if st.button("MNE", key="me", type="primary" if st.session_state.lang == "ME" else "secondary"):
-        st.session_state.lang = "ME"
-        st.rerun()
-with c2:
-    if st.button("EN", key="en", type="primary" if st.session_state.lang == "EN" else "secondary"):
-        st.session_state.lang = "EN"
-        st.rerun()
-with c3:
-    if st.button("РУ", key="ru", type="primary" if st.session_state.lang == "RU" else "secondary"):
-        st.session_state.lang = "RU"
-        st.rerun()
-
-# --- 6. BUS DATA & ETA ---
-st.write("---")
+# --- 6. BUS DATA & MAP (Guaranteed to Render) ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
 for doc in buses_ref:
     bus = doc.to_dict()
-    target = st.session_state.selected_station
-    target_idx = ROUTE_ORDER.index(target)
-    # Custom waypoints for the Herceg Novi route
-    route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
-
+    target_coords = STATIONS[selected_station]
+    
     try:
-        res = gmaps.directions(origin=(bus['lat'], bus['lon']), 
-                               destination=(STATIONS[target]['lat'], STATIONS[target]['lon']), 
-                               waypoints=route_waypoints, mode="driving", departure_time="now")
+        # Direct point-to-point for stability
+        res = gmaps.directions(
+            origin=(bus['lat'], bus['lon']),
+            destination=(target_coords['lat'], target_coords['lon']),
+            mode="driving",
+            departure_time="now"
+        )
         if res:
-            seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
-            all_bus_etas.append({"seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
-    except:
+            seconds = res[0]['legs'][0].get('duration_in_traffic', res[0]['legs'][0]['duration'])['value']
+            all_bus_etas.append({
+                "seconds": seconds, 
+                "lat": bus['lat'], 
+                "lon": bus['lon'], 
+                "name": f"Bus {doc.id[-4:]}"
+            })
+    except Exception as e:
         continue
 
+# Display Metric
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
-    st.metric(f"{txt['next']} {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
-    
-    # Map logic using the data we just fetched
-    bus_df = pd.DataFrame(all_bus_etas) # FIXED: NameError pd is gone
-    # ... (Rest of your Pydeck map code here)
+    st.metric(f"{txt['next']} {selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
 else:
-    st.warning(txt['none'])
+    st.info(txt['none'])
+
+# --- 7. THE MAP (Independent of Logic) ---
+# We build the dataframes here to ensure the map always has something to show
+stops_data = pd.DataFrame([
+    {"name": k, "lat": v["lat"], "lon": v["lon"]} for k, v in STATIONS.items()
+])
+
+bus_data = pd.DataFrame(all_bus_etas) if all_bus_etas else pd.DataFrame(columns=["lat", "lon", "name"])
+
+view_state = pdk.ViewState(
+    latitude=42.4572,
+    longitude=18.5383,
+    zoom=12,
+    pitch=0
+)
+
+# Layer for bus stops
+stops_layer = pdk.Layer(
+    "ScatterplotLayer",
+    stops_data,
+    get_position="[lon, lat]",
+    get_color="[0, 100, 255, 160]",
+    get_radius=150,
+)
+
+# Layer for buses
+bus_layer = pdk.Layer(
+    "IconLayer",
+    bus_data,
+    get_position="[lon, lat]",
+    get_icon='''{
+        "url": "https://img.icons8.com/color/96/bus.png",
+        "width": 128, "height": 128, "anchorY": 128
+    }''',
+    get_size=40,
+)
+
+st.pydeck_chart(pdk.Deck(
+    layers=[stops_layer, bus_layer],
+    initial_view_state=view_state,
+    tooltip={"text": "{name}"}
+))
