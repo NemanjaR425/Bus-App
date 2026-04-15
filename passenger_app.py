@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd  # Fixed the NameError from your last screenshot
+import pandas as pd  # FIXED: Added to prevent the NameError in your screenshot
 import pydeck as pdk
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -25,6 +25,7 @@ LANGS = {
 
 # --- 2. INITIALIZATION ---
 if not firebase_admin._apps:
+    # Using the credentials you've set up for the Boka region tracker
     cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
     firebase_admin.initialize_app(cred)
 db = firestore.client()
@@ -48,36 +49,34 @@ st.selectbox(txt['wait'], options=ROUTE_ORDER,
              index=ROUTE_ORDER.index(st.session_state.selected_station), 
              key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. THE "NON-STRETCH" LANGUAGE BAR ---
+# --- 5. THE "NON-STACKING" LANGUAGE BAR ---
 st.write("---")
 
 st.markdown("""
     <style>
-    /* 1. Target the specific block containing our buttons */
-    [data-testid="stVerticalBlock"] > div:has(.lang-anchor) {
+    /* FORCE THE ROW: This stops Streamlit from stacking on mobile */
+    div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
         justify-content: flex-start !important;
-        gap: 8px !important;
-        width: 100% !important;
+        gap: 10px !important;
+    }
+    
+    /* FORCE COLUMN WIDTH: Prevents them from stretching to full width */
+    div[data-testid="column"] {
+        width: fit-content !important;
+        flex: unset !important;
+        min-width: unset !important;
     }
 
-    /* 2. FORCE the button wrappers to NOT take up full width */
-    [data-testid="stVerticalBlock"] > div:has(.lang-anchor) > div {
-        width: auto !important;
-        flex: none !important;
-    }
-
-    /* 3. Style the buttons into tight circles */
+    /* CIRCLE BUTTONS: Consistent with your previous design */
     .stButton > button {
         border-radius: 50% !important;
-        width: 55px !important;
-        height: 55px !important;
-        min-width: 55px !important;
+        width: 60px !important;
+        height: 60px !important;
         padding: 0px !important;
         font-weight: bold !important;
-        font-size: 12px !important;
         border: 2px solid #4CAF50 !important;
     }
 
@@ -88,24 +87,50 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-with st.container():
-    # This anchor helps our CSS find the right block to turn into a row
-    st.markdown('<div class="lang-anchor"></div>', unsafe_allow_html=True)
-    
+# Using columns, but the CSS above will "freeze" them in a row
+c1, c2, c3, _ = st.columns([1, 1, 1, 5])
+
+with c1:
     if st.button("MNE", key="me", type="primary" if st.session_state.lang == "ME" else "secondary"):
         st.session_state.lang = "ME"
         st.rerun()
+with c2:
     if st.button("EN", key="en", type="primary" if st.session_state.lang == "EN" else "secondary"):
         st.session_state.lang = "EN"
         st.rerun()
+with c3:
     if st.button("РУ", key="ru", type="primary" if st.session_state.lang == "RU" else "secondary"):
         st.session_state.lang = "RU"
         st.rerun()
 
 # --- 6. BUS DATA & ETA ---
 st.write("---")
-# Data fetching and ETA logic here...
-st.metric(f"{txt['next']} {st.session_state.selected_station}", f"9 {txt['mins']}")
+buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
+all_bus_etas = []
 
-# --- 7. MAP ---
-# Pydeck map implementation here...
+for doc in buses_ref:
+    bus = doc.to_dict()
+    target = st.session_state.selected_station
+    target_idx = ROUTE_ORDER.index(target)
+    # Custom waypoints for the Herceg Novi route
+    route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
+
+    try:
+        res = gmaps.directions(origin=(bus['lat'], bus['lon']), 
+                               destination=(STATIONS[target]['lat'], STATIONS[target]['lon']), 
+                               waypoints=route_waypoints, mode="driving", departure_time="now")
+        if res:
+            seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
+            all_bus_etas.append({"seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
+    except:
+        continue
+
+if all_bus_etas:
+    all_bus_etas.sort(key=lambda x: x['seconds'])
+    st.metric(f"{txt['next']} {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
+    
+    # Map logic using the data we just fetched
+    bus_df = pd.DataFrame(all_bus_etas) # FIXED: NameError pd is gone
+    # ... (Rest of your Pydeck map code here)
+else:
+    st.warning(txt['none'])
