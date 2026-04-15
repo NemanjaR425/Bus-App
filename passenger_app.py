@@ -7,9 +7,39 @@ import googlemaps
 
 # --- 1. CONFIG ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
-st.title("🚌 Herceg Novi Live Bus")
 
-# --- 2. DATA (Hardcoded to ensure map always has points to show) ---
+# --- 2. TRANSLATION DICTIONARY ---
+LANGS = {
+    "🇬🇧 English": {
+        "title": "Herceg Novi Live Bus",
+        "wait_label": "Where are you waiting?",
+        "next_arr": "Next Bus to",
+        "mins": "mins",
+        "no_bus": "No buses currently active on Line 1.",
+        "station_help": "Select a station or tap the map",
+        "refresh": "Refresh Map"
+    },
+    "🇲🇪 Crnogorski": {
+        "title": "Herceg Novi - Autobus Uživo",
+        "wait_label": "Gdje čekate autobus?",
+        "next_arr": "Sledeći autobus za",
+        "mins": "min",
+        "no_bus": "Trenutno nema aktivnih autobusa na Liniji 1.",
+        "station_help": "Izaberite stanicu ili kliknite na mapu",
+        "refresh": "Osvježi mapu"
+    },
+    "🇷🇺 Русский": {
+        "title": "Автобус Герцег-Нови Живьем",
+        "wait_label": "Где вы ждете?",
+        "next_arr": "Следующий автобус до",
+        "mins": "мин",
+        "no_bus": "На Линии 1 сейчас нет активных автобусов.",
+        "station_help": "Выберите станцию или нажмите на карту",
+        "refresh": "Обновить карту"
+    }
+}
+
+# --- 3. DATA & INIT ---
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -19,82 +49,98 @@ STATIONS = {
 }
 ROUTE_ORDER = list(STATIONS.keys())
 
-# --- 3. INITIALIZATION ---
 if not firebase_admin._apps:
     cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 4. SELECTION ---
-selected_station = st.selectbox("Where are you waiting?", options=ROUTE_ORDER)
+# --- 4. LANGUAGE & STATION STATE ---
+# Language Selector in Sidebar
+selected_lang_name = st.sidebar.selectbox("Language / Jezik / Язык", list(LANGS.keys()))
+txt = LANGS[selected_lang_name]
 
-# --- 5. BUS FETCHING ---
-active_buses = []
-try:
-    # Querying Firestore for Line 1 buses
-    docs = db.collection("active_buses").where("line", "==", "Line_1").stream()
-    for doc in docs:
-        data = doc.to_dict()
-        active_buses.append({"lat": data['lat'], "lon": data['lon']})
-except Exception as e:
-    st.error(f"Database error: {e}")
+if "selected_station" not in st.session_state:
+    qp = st.query_params
+    st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
-# --- 6. THE MAP FIX ---
-# Step A: Static Stop Data (This prevents the JSON crash)
-stops_df = pd.DataFrame([{"name": k, "lat": v["lat"], "lon": v["lon"]} for k, v in STATIONS.items()])
+# --- 5. UI ---
+st.title(f"🚌 {txt['title']}")
 
-# Step B: Create the Base Layer (Bus Stops)
-layers = [
-    pdk.Layer(
-        "ScatterplotLayer",
-        stops_df,
-        get_position="[lon, lat]",
-        get_color="[0, 150, 255, 200]",
-        get_radius=150,
-    )
-]
+def handle_dropdown():
+    st.session_state.selected_station = st.session_state.manual_choice
 
-# Step C: Only add the Bus Layer if there is data
-if active_buses:
-    bus_df = pd.DataFrame(active_buses)
-    layers.append(
-        pdk.Layer(
-            "IconLayer",
-            bus_df,
-            get_position="[lon, lat]",
-            get_icon='''{
-                "url": "https://img.icons8.com/color/96/bus.png",
-                "width": 128, "height": 128, "anchorY": 128
-            }''',
-            get_size=45,
-        )
-    )
+selected_stop = st.selectbox(
+    txt['wait_label'],
+    options=ROUTE_ORDER,
+    index=ROUTE_ORDER.index(st.session_state.selected_station),
+    key="manual_choice",
+    on_change=handle_dropdown,
+    help=txt['station_help']
+)
 
-# Step D: Render Map
-st.pydeck_chart(pdk.Deck(
-    layers=layers,
-    initial_view_state=pdk.ViewState(
-        latitude=STATIONS[selected_station]["lat"],
-        longitude=STATIONS[selected_station]["lon"],
-        zoom=13
-    ),
-    map_style="mapbox://styles/mapbox/light-v10"
-))
+# --- 6. ETA LOGIC ---
+buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
+all_bus_etas = []
 
-# --- 7. ETA CALCULATION ---
-if active_buses:
-    # Calculate ETA using Google Maps API
+for doc in buses_ref:
+    bus = doc.to_dict()
+    target = st.session_state.selected_station
+    target_idx = ROUTE_ORDER.index(target)
+    route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
+
     try:
         res = gmaps.directions(
-            origin=(active_buses[0]['lat'], active_buses[0]['lon']),
-            destination=(STATIONS[selected_station]['lat'], STATIONS[selected_station]['lon']),
-            mode="driving", departure_time="now"
+            origin=(bus['lat'], bus['lon']),
+            destination=(STATIONS[target]['lat'], STATIONS[target]['lon']),
+            waypoints=route_waypoints,
+            optimize_waypoints=False,
+            mode="driving",
+            departure_time="now"
         )
         if res:
-            eta = res[0]['legs'][0].get('duration_in_traffic', res[0]['legs'][0]['duration'])['text']
-            st.success(f"Next Bus to {selected_station}: {eta}")
+            seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
+            all_bus_etas.append({"id": bus.get('bus_id'), "seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
     except:
-        st.write("Calculating ETA...")
+        continue
+
+# Display Metrics
+if all_bus_etas:
+    all_bus_etas.sort(key=lambda x: x['seconds'])
+    best_eta = all_bus_etas[0]['seconds'] // 60
+    st.metric(f"{txt['next_arr']} {st.session_state.selected_station}", f"{best_eta} {txt['mins']}")
 else:
-    st.info("No active buses currently detected on Line 1.")
+    st.warning(txt['no_bus'])
+
+# --- 7. INTERACTIVE MAP ---
+station_df = pd.DataFrame([
+    {
+        'name': n, 'lat': c['lat'], 'lon': c['lon'], 
+        'color': [255, 0, 0, 255] if n == st.session_state.selected_station else [0, 100, 255, 160]
+    } for n, c in STATIONS.items()
+])
+
+bus_df = pd.DataFrame(all_bus_etas)
+if not bus_df.empty:
+    bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
+
+view = pdk.ViewState(latitude=42.4572, longitude=18.5283, zoom=12.5)
+
+s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="station_layer", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
+b_layer = pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
+
+map_data = st.pydeck_chart(
+    pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
+    on_select="rerun",
+    selection_mode="single-object",
+    key="bus_map"
+)
+
+# Handle Map Selection
+if map_data.selection:
+    objs = map_data.selection.get("objects", {}).get("station_layer")
+    if objs:
+        new_station = objs[0]["name"]
+        if new_station != st.session_state.selected_station:
+            st.session_state.selected_station = new_station
+            st.rerun()
