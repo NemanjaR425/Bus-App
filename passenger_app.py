@@ -8,7 +8,6 @@ import googlemaps
 # --- 1. CONFIG & DATA ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
-# Static Station Data
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -18,34 +17,30 @@ STATIONS = {
 }
 ROUTE_ORDER = list(STATIONS.keys())
 
-# Translation Dictionary
 LANGS = {
     "EN": {
-        "flag": "https://cdn-icons-png.flaticon.com/512/197/197374.png",
         "title": "Herceg Novi Live Bus",
         "wait_label": "Where are you waiting?",
         "next_arr": "Next Bus to",
         "mins": "mins",
-        "no_bus": "No buses currently active on Line 1.",
-        "btn_label": "English"
+        "no_bus": "No buses active on Line 1.",
+        "label": "EN"
     },
     "ME": {
-        "flag": "https://cdn-icons-png.flaticon.com/512/3054/3054045.png",
         "title": "Herceg Novi - Autobus Uživo",
         "wait_label": "Gdje čekate autobus?",
         "next_arr": "Sledeći autobus za",
         "mins": "min",
-        "no_bus": "Trenutno nema aktivnih autobusa na Liniji 1.",
-        "btn_label": "Crnogorski"
+        "no_bus": "Nema aktivnih autobusa na Liniji 1.",
+        "label": "MNE"
     },
     "RU": {
-        "flag": "https://cdn-icons-png.flaticon.com/512/197/197403.png",
         "title": "Автобус Герцег-Нови Живьем",
         "wait_label": "Где вы ждете?",
         "next_arr": "Следующий автобус до",
         "mins": "мин",
-        "no_bus": "На Линии 1 сейчас нет активных автобусов.",
-        "btn_label": "Русский"
+        "no_bus": "На Линии 1 нет активных автобусов.",
+        "label": "Ру"
     }
 }
 
@@ -81,49 +76,50 @@ selected_stop = st.selectbox(
     on_change=handle_dropdown
 )
 
-# --- 5. HORIZONTAL FLAG BUTTONS ---
-st.write("")
-# CSS to force horizontal columns and center icons
+# --- 5. ROUND LANGUAGE BUTTONS (Horizontal) ---
 st.markdown("""
     <style>
-    [data-testid="column"] {
-        width: calc(20% - 1rem) !important;
-        flex: 1 1 calc(20% - 1rem) !important;
-        min-width: 60px !important;
-        text-align: center;
-    }
+    /* Force columns to stay side-by-side on mobile */
     div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         display: flex !important;
         flex-wrap: nowrap !important;
+        justify-content: flex-start !important;
     }
-    [data-testid="stImage"] {
-        display: flex;
-        justify-content: center;
-        margin-bottom: -10px;
+    [data-testid="column"] {
+        width: 70px !important;
+        flex: 0 0 70px !important;
+        min-width: 70px !important;
     }
+    /* Make buttons round */
+    .stButton > button {
+        border-radius: 50px !important;
+        width: 60px !important;
+        height: 60px !important;
+        padding: 0px !important;
+        font-weight: bold !important;
+        border: 2px solid #4CAF50 !important;
+    }
+    /* Highlight the active language */
     </style>
     """, unsafe_allow_html=True)
 
-f1, f2, f3, _ = st.columns([1, 1, 1, 4])
+c1, c2, c3, _ = st.columns([1, 1, 1, 5])
 
-with f1:
-    st.image(LANGS["EN"]["flag"], width=40)
-    if st.button(LANGS["EN"]["btn_label"], key="set_en", use_container_width=True):
-        st.session_state.lang = "EN"
-        st.rerun()
-with f2:
-    st.image(LANGS["ME"]["flag"], width=40)
-    if st.button(LANGS["ME"]["btn_label"], key="set_me", use_container_width=True):
+with c1:
+    if st.button(LANGS["ME"]["label"], key="btn_me"):
         st.session_state.lang = "ME"
         st.rerun()
-with f3:
-    st.image(LANGS["RU"]["flag"], width=40)
-    if st.button(LANGS["RU"]["btn_label"], key="set_ru", use_container_width=True):
+with c2:
+    if st.button(LANGS["EN"]["label"], key="btn_en"):
+        st.session_state.lang = "EN"
+        st.rerun()
+with c3:
+    if st.button(LANGS["RU"]["label"], key="btn_ru"):
         st.session_state.lang = "RU"
         st.rerun()
 
-# --- 6. BUS DATA & ETA CALCULATION ---
+# --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
@@ -131,8 +127,6 @@ for doc in buses_ref:
     bus = doc.to_dict()
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
-    
-    # Waypoints for accurate coastal route calculation
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
@@ -150,14 +144,14 @@ for doc in buses_ref:
     except:
         continue
 
-# Display Metric Result
+# Metrics
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
     st.metric(f"{txt['next_arr']} {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
 else:
     st.warning(txt['no_bus'])
 
-# --- 7. THE INTERACTIVE MAP ---
+# --- 7. MAP ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -171,8 +165,8 @@ if not bus_df.empty:
 
 view = pdk.ViewState(latitude=42.4572, longitude=18.5383, zoom=12.5)
 
-s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="stops_layer", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
-b_layer = pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
+s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="stops", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
+b_layer = pdk.Layer("IconLayer", data=bus_df, id="buses", get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
 
 map_data = st.pydeck_chart(
     pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
@@ -181,9 +175,9 @@ map_data = st.pydeck_chart(
     key="bus_map"
 )
 
-# Handle Click and Update State
+# Handle Map Selection
 if map_data and map_data.selection:
-    objs = map_data.selection.get("objects", {}).get("stops_layer")
+    objs = map_data.selection.get("objects", {}).get("stops")
     if objs:
         new_pick = objs[0]["name"]
         if new_pick != st.session_state.selected_station:
