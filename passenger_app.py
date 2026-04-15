@@ -29,10 +29,9 @@ if "selected_station" not in st.session_state:
     qp = st.query_params
     st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
-# --- 4. THE DROPDOWN ---
+# --- 4. THE UI HEADER ---
 st.title("🚌 Herceg Novi Live Bus")
 
-# We use an 'on_change' callback for the dropdown to make it more responsive
 def handle_dropdown():
     st.session_state.selected_station = st.session_state.manual_choice
 
@@ -44,15 +43,15 @@ selected_stop = st.selectbox(
     on_change=handle_dropdown
 )
 
-# --- 5. BUS DATA & ETA ---
+# --- 5. BUS DATA & ETA (PRIORITY RENDERING) ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
 for doc in buses_ref:
     bus = doc.to_dict()
-    # Route-aware calculation
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
+    # Correct waypoint logic for the region
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
@@ -70,14 +69,14 @@ for doc in buses_ref:
     except:
         continue
 
-# Display Metrics
+# Display Metrics BEFORE the map so they show up even if the map snags
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
     st.metric(f"Next Bus to {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} mins")
 else:
-    st.warning("No buses currently active.")
+    st.warning("No buses currently active on Line 1.")
 
-# --- 6. MAP PREP ---
+# --- 6. MAP LAYERS ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -85,46 +84,60 @@ station_df = pd.DataFrame([
     } for n, c in STATIONS.items()
 ])
 
-bus_df = pd.DataFrame(all_bus_etas)
-if not bus_df.empty:
+# Always include the station layer
+layers = [
+    pdk.Layer(
+        "ScatterplotLayer", 
+        data=station_df, 
+        id="station_layer", 
+        get_position="[lon, lat]", 
+        get_color="color", 
+        get_radius=180, 
+        pickable=True
+    )
+]
+
+# CRITICAL FIX: Only add the IconLayer if bus data exists
+if all_bus_etas:
+    bus_df = pd.DataFrame(all_bus_etas)
     bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
+    
+    layers.append(pdk.Layer(
+        "IconLayer", 
+        data=bus_df, 
+        get_position="[lon, lat]", 
+        get_icon="icon_data", 
+        get_size=5, 
+        size_scale=15
+    ))
 
-view = pdk.ViewState(latitude=42.4572, longitude=18.5283, zoom=12.5)
-
-# --- 7. THE INTERACTIVE MAP ---
-# Crucial: the 'id' must be unique and stable
-s_layer = pdk.Layer(
-    "ScatterplotLayer", 
-    data=station_df, 
-    id="station_layer", 
-    get_position="[lon, lat]", 
-    get_color="color", 
-    get_radius=180, 
-    pickable=True
+# --- 7. RENDER ---
+view = pdk.ViewState(
+    latitude=STATIONS[st.session_state.selected_station]["lat"], 
+    longitude=STATIONS[st.session_state.selected_station]["lon"], 
+    zoom=13
 )
 
-b_layer = pdk.Layer(
-    "IconLayer", 
-    data=bus_df, 
-    get_position="[lon, lat]", 
-    get_icon="icon_data", 
-    get_size=5, 
-    size_scale=15
-)
+try:
+    map_data = st.pydeck_chart(
+        pdk.Deck(
+            layers=layers, 
+            initial_view_state=view, 
+            tooltip={"text": "{name}"},
+            map_style="mapbox://styles/mapbox/dark-v10"
+        ),
+        on_select="rerun",
+        selection_mode="single-object",
+        key="bus_map"
+    )
 
-map_data = st.pydeck_chart(
-    pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
-    on_select="rerun",
-    selection_mode="single-object",
-    key="bus_map"
-)
-
-# --- 8. THE CATCHER (Handle Click) ---
-# If map_data has a selection, we update state and RE-RUN immediately.
-if map_data.selection:
-    objs = map_data.selection.get("objects", {}).get("station_layer")
-    if objs:
-        new_station = objs[0]["name"]
-        if new_station != st.session_state.selected_station:
-            st.session_state.selected_station = new_station
-            st.rerun()
+    # --- 8. HANDLE CLICK ---
+    if map_data and map_data.selection:
+        objs = map_data.selection.get("objects", {}).get("station_layer")
+        if objs:
+            new_station = objs[0]["name"]
+            if new_station != st.session_state.selected_station:
+                st.session_state.selected_station = new_station
+                st.rerun()
+except Exception as e:
+    st.error("Map loading error. ETA metrics above are still active.")
