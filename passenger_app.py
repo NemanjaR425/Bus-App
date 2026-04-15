@@ -49,25 +49,26 @@ st.selectbox(txt['wait'], options=ROUTE_ORDER,
              index=ROUTE_ORDER.index(st.session_state.selected_station), 
              key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. THE "GRID" LANGUAGE BAR (NO FULL RELOAD) ---
+# --- 5. THE "GRID" LANGUAGE BAR (Forced Horizontal) ---
 st.write("---")
 
-# This CSS creates a custom container for buttons using CSS Grid
 st.markdown("""
     <style>
-    /* target the specific container where our buttons live */
-    [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] > div:nth-child(2) {
-        display: grid !important;
-        grid-template-columns: repeat(3, 65px) !important; /* 3 tight columns of 65px */
+    /* 1. Target the vertical block inside the container and force it to be a row */
+    [data-testid="stVerticalBlock"] > div:has(div > .stButton) {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
         gap: 10px !important;
-        justify-content: start !important;
+        justify-content: flex-start !important;
     }
-    
-    /* Force buttons into circles */
+
+    /* 2. Style buttons into tight circles */
     .stButton > button {
         border-radius: 50% !important;
         width: 60px !important;
         height: 60px !important;
+        min-width: 60px !important;
         padding: 0px !important;
         font-weight: bold !important;
         font-size: 14px !important;
@@ -76,8 +77,8 @@ st.markdown("""
         align-items: center !important;
         justify-content: center !important;
     }
-    
-    /* Selection color */
+
+    /* 3. Selected state */
     .stButton > button[kind="primary"] {
         background-color: #4CAF50 !important;
         color: white !important;
@@ -85,7 +86,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Using a container ensures the grid CSS targets only these buttons
+# Placing buttons inside a single container so the CSS can find them as siblings
 with st.container():
     if st.button("MNE", key="btn_me", type="primary" if st.session_state.lang == "ME" else "secondary"):
         st.session_state.lang = "ME"
