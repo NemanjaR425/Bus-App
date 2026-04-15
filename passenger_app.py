@@ -1,6 +1,6 @@
 import streamlit as st
-import pdk
 import pandas as pd
+import pydeck as pdk
 import firebase_admin
 from firebase_admin import credentials, firestore
 import googlemaps
@@ -49,10 +49,8 @@ st.selectbox(txt['wait'], options=ROUTE_ORDER, index=ROUTE_ORDER.index(st.sessio
 # --- 5. THE "FIXED" LANGUAGE BAR ---
 st.write("---")
 
-# CSS to force buttons to be round, large, and tightly packed in one row
 st.markdown("""
     <style>
-    /* Force horizontal row that NEVER wraps on mobile */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
@@ -61,13 +59,11 @@ st.markdown("""
         gap: 12px !important;
         width: 100% !important;
     }
-    /* Set fixed sizes for the columns so they don't grow */
     div[data-testid="column"] {
         width: 65px !important;
         flex: 0 0 65px !important;
         padding: 0px !important;
     }
-    /* Style the actual buttons */
     .stButton > button {
         border-radius: 50% !important;
         width: 62px !important;
@@ -80,7 +76,6 @@ st.markdown("""
         align-items: center !important;
         justify-content: center !important;
     }
-    /* Highlight the active language */
     .stButton > button[kind="primary"] {
         background-color: #4CAF50 !important;
         color: white !important;
@@ -88,7 +83,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Create 4 columns: 3 for buttons, 1 as a "spacer" to push them left
 c1, c2, c3, spacer = st.columns([1, 1, 1, 10])
 
 with c1:
