@@ -24,68 +24,60 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. UI: STATION SELECTOR ---
-st.title("🚌 Herceg Novi Live Bus")
+# --- 3. UI: LANGUAGE & SELECTION ---
+# Large, square buttons that stay in a row
+cols = st.columns(3)
+if "lang" not in st.session_state: st.session_state.lang = "EN"
 
-selected_station = st.selectbox(
-    "Where are you waiting?", 
-    options=ROUTE_ORDER,
-    index=0
-)
+with cols[0]:
+    if st.button("🇲🇪 MNE", use_container_width=True): st.session_state.lang = "ME"
+with cols[1]:
+    if st.button("🇬🇧 EN", use_container_width=True): st.session_state.lang = "EN"
+with cols[2]:
+    if st.button("🇷🇺 РУ", use_container_width=True): st.session_state.lang = "RU"
 
-# --- 4. BUS DATA FETCHING ---
+selected_station = st.selectbox("Where are you waiting?", options=ROUTE_ORDER)
+
+# --- 4. DATA FETCHING ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
-all_bus_etas = []
+active_bus_list = []
 
 for doc in buses_ref:
     bus = doc.to_dict()
-    try:
-        res = gmaps.directions(
-            origin=(bus['lat'], bus['lon']),
-            destination=(STATIONS[selected_station]['lat'], STATIONS[selected_station]['lon']),
-            mode="driving", departure_time="now"
+    active_bus_list.append({"lat": bus['lat'], "lon": bus['lon']})
+
+# --- 5. THE MAP FIX (NO MORE JSON ERRORS) ---
+# Layer 1: Always show the stations (Static data = No crashes)
+stops_df = pd.DataFrame([{"name": k, "lat": v["lat"], "lon": v["lon"]} for k, v in STATIONS.items()])
+layers = [
+    pdk.Layer(
+        "ScatterplotLayer",
+        stops_df,
+        get_position="[lon, lat]",
+        get_color="[0, 150, 255, 200]",
+        get_radius=150,
+    )
+]
+
+# Layer 2: Only add the bus layer if there is at least one bus
+if active_bus_list:
+    bus_df = pd.DataFrame(active_bus_list)
+    layers.append(
+        pdk.Layer(
+            "IconLayer",
+            bus_df,
+            get_position="[lon, lat]",
+            get_icon='''{
+                "url": "https://img.icons8.com/color/96/bus.png",
+                "width": 128, "height": 128, "anchorY": 128
+            }''',
+            get_size=40,
         )
-        if res:
-            seconds = res[0]['legs'][0].get('duration_in_traffic', res[0]['legs'][0]['duration'])['value']
-            all_bus_etas.append({"seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
-    except:
-        continue
+    )
 
-# --- 5. THE MAP FIX (CRITICAL) ---
-# We define the dataframes outside of any 'if' blocks to ensure 
-# they always exist for the Pydeck layers.
-if all_bus_etas:
-    bus_df = pd.DataFrame(all_bus_etas)
-else:
-    # We provide a 'dummy' row so Pydeck doesn't crash on an empty list
-    bus_df = pd.DataFrame([{"lat": 0, "lon": 0}])
-
-# Define the layers
-stops_data = pd.DataFrame([{"name": k, "lat": v["lat"], "lon": v["lon"]} for k, v in STATIONS.items()])
-stops_layer = pdk.Layer(
-    "ScatterplotLayer",
-    stops_data,
-    get_position="[lon, lat]",
-    get_color="[0, 150, 255, 180]",
-    get_radius=100,
-)
-
-bus_layer = pdk.Layer(
-    "IconLayer",
-    bus_df,
-    get_position="[lon, lat]",
-    get_icon='''{
-        "url": "https://img.icons8.com/color/96/bus.png",
-        "width": 128, "height": 128, "anchorY": 128
-    }''',
-    get_size=40,
-    # If no buses exist, we set opacity to 0 to hide the dummy row
-    opacity=1 if all_bus_etas else 0 
-)
-
-# Final Map Render
+# Render the map with whatever layers we have
 st.pydeck_chart(pdk.Deck(
-    layers=[stops_layer, bus_layer],
+    layers=layers,
     initial_view_state=pdk.ViewState(
         latitude=STATIONS[selected_station]["lat"],
         longitude=STATIONS[selected_station]["lon"],
@@ -94,8 +86,7 @@ st.pydeck_chart(pdk.Deck(
 ))
 
 # --- 6. ETA DISPLAY ---
-if all_bus_etas:
-    all_bus_etas.sort(key=lambda x: x['seconds'])
-    st.metric(f"Next Bus to {selected_station}", f"{all_bus_etas[0]['seconds'] // 60} mins")
+if active_bus_list:
+    st.success(f"Bus is on the way to {selected_station}!")
 else:
-    st.info("No buses active on Line 1 currently.")
+    st.info("No active buses on Line 1 at the moment.")
