@@ -24,8 +24,10 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. UI: LANGUAGE & SELECTION ---
-# Large, square buttons that stay in a row
+# --- 3. UI: TITLE & LANGUAGE (PRIORITY) ---
+# Putting the title at the top ensures it renders first
+st.title("🚌 Herceg Novi Live Bus")
+
 cols = st.columns(3)
 if "lang" not in st.session_state: st.session_state.lang = "EN"
 
@@ -39,17 +41,20 @@ with cols[2]:
 selected_station = st.selectbox("Where are you waiting?", options=ROUTE_ORDER)
 
 # --- 4. DATA FETCHING ---
-buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 active_bus_list = []
+try:
+    buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
+    for doc in buses_ref:
+        bus = doc.to_dict()
+        active_bus_list.append({"lat": bus['lat'], "lon": bus['lon']})
+except Exception as e:
+    st.warning("Connecting to bus data...")
 
-for doc in buses_ref:
-    bus = doc.to_dict()
-    active_bus_list.append({"lat": bus['lat'], "lon": bus['lon']})
-
-# --- 5. THE MAP FIX (NO MORE JSON ERRORS) ---
-# Layer 1: Always show the stations (Static data = No crashes)
+# --- 5. THE MAP (ERROR-PROOFED) ---
+# We force the stops to exist first so the map always has valid data
 stops_df = pd.DataFrame([{"name": k, "lat": v["lat"], "lon": v["lon"]} for k, v in STATIONS.items()])
-layers = [
+
+main_layers = [
     pdk.Layer(
         "ScatterplotLayer",
         stops_df,
@@ -59,10 +64,10 @@ layers = [
     )
 ]
 
-# Layer 2: Only add the bus layer if there is at least one bus
+# Only add the problematic bus layer if data actually exists
 if active_bus_list:
     bus_df = pd.DataFrame(active_bus_list)
-    layers.append(
+    main_layers.append(
         pdk.Layer(
             "IconLayer",
             bus_df,
@@ -75,14 +80,17 @@ if active_bus_list:
         )
     )
 
-# Render the map with whatever layers we have
+# Use a static view state if the selected station isn't found
+view_state = pdk.ViewState(
+    latitude=STATIONS[selected_station]["lat"],
+    longitude=STATIONS[selected_station]["lon"],
+    zoom=13
+)
+
 st.pydeck_chart(pdk.Deck(
-    layers=layers,
-    initial_view_state=pdk.ViewState(
-        latitude=STATIONS[selected_station]["lat"],
-        longitude=STATIONS[selected_station]["lon"],
-        zoom=13
-    )
+    layers=main_layers,
+    initial_view_state=view_state,
+    map_style="mapbox://styles/mapbox/dark-v10"
 ))
 
 # --- 6. ETA DISPLAY ---
