@@ -97,7 +97,7 @@ with st.container():
     if st.button("РУ", key="btn_ru", type="primary" if st.session_state.lang == "RU" else "secondary"):
         st.session_state.lang = "RU"
         st.rerun()
-
+        
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
