@@ -30,17 +30,12 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. STATE & QUERY PARAMS ---
-# Check URL for language changes first
-query_params = st.query_params
-if "lang" in query_params:
-    st.session_state.lang = query_params["lang"]
-
+# --- 3. STATE ---
 if "lang" not in st.session_state:
     st.session_state.lang = "EN"
 
 if "selected_station" not in st.session_state:
-    st.session_state.selected_station = query_params.get("station", ROUTE_ORDER[0])
+    st.session_state.selected_station = ROUTE_ORDER[0]
 
 txt = LANGS[st.session_state.lang]
 
@@ -54,50 +49,53 @@ st.selectbox(txt['wait'], options=ROUTE_ORDER,
              index=ROUTE_ORDER.index(st.session_state.selected_station), 
              key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. THE "TRUE FLEX" LANGUAGE BAR ---
+# --- 5. THE "GRID" LANGUAGE BAR (NO FULL RELOAD) ---
 st.write("---")
 
-# This CSS creates a tight row of circles. We use <a> tags styled as buttons.
-# They look like your previous "Set EN" buttons but round and tight.
-st.markdown(f"""
+# This CSS creates a custom container for buttons using CSS Grid
+st.markdown("""
     <style>
-    .lang-container {{
-        display: flex !important;
-        flex-direction: row !important;
+    /* target the specific container where our buttons live */
+    [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] > div:nth-child(2) {
+        display: grid !important;
+        grid-template-columns: repeat(3, 65px) !important; /* 3 tight columns of 65px */
         gap: 10px !important;
-        justify-content: flex-start !important;
-        margin-bottom: 20px;
-    }}
-    .lang-btn {{
+        justify-content: start !important;
+    }
+    
+    /* Force buttons into circles */
+    .stButton > button {
+        border-radius: 50% !important;
         width: 60px !important;
         height: 60px !important;
-        border-radius: 50% !important;
+        padding: 0px !important;
+        font-weight: bold !important;
+        font-size: 14px !important;
         border: 2px solid #4CAF50 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        text-decoration: none !important;
-        color: white !important;
-        font-weight: bold !important;
-        font-size: 14px !important;
-        transition: 0.2s;
-        background-color: transparent;
-    }}
-    .lang-btn:hover {{
-        background-color: rgba(76, 175, 80, 0.2);
-    }}
-    .active-lang {{
-        background-color: #4CAF50 !important;
-        box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
-    }}
-    </style>
+    }
     
-    <div class="lang-container">
-        <a href="/?lang=ME" target="_self" class="lang-btn {'active-lang' if st.session_state.lang == 'ME' else ''}">MNE</a>
-        <a href="/?lang=EN" target="_self" class="lang-btn {'active-lang' if st.session_state.lang == 'EN' else ''}">EN</a>
-        <a href="/?lang=RU" target="_self" class="lang-btn {'active-lang' if st.session_state.lang == 'RU' else ''}">РУ</a>
-    </div>
+    /* Selection color */
+    .stButton > button[kind="primary"] {
+        background-color: #4CAF50 !important;
+        color: white !important;
+    }
+    </style>
 """, unsafe_allow_html=True)
+
+# Using a container ensures the grid CSS targets only these buttons
+with st.container():
+    if st.button("MNE", key="btn_me", type="primary" if st.session_state.lang == "ME" else "secondary"):
+        st.session_state.lang = "ME"
+        st.rerun()
+    if st.button("EN", key="btn_en", type="primary" if st.session_state.lang == "EN" else "secondary"):
+        st.session_state.lang = "EN"
+        st.rerun()
+    if st.button("РУ", key="btn_ru", type="primary" if st.session_state.lang == "RU" else "secondary"):
+        st.session_state.lang = "RU"
+        st.rerun()
 
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
