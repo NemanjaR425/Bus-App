@@ -8,6 +8,34 @@ import googlemaps
 # --- 1. CONFIG & DATA ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
+# Translation Dictionary
+LANGS = {
+    "🇬🇧 English": {
+        "title": "Herceg Novi Live Bus",
+        "wait_label": "Where are you waiting?",
+        "next_arr": "Next Bus to",
+        "mins": "mins",
+        "no_bus": "No buses currently active on Line 1.",
+        "refresh": "Refresh Map"
+    },
+    "🇲🇪 Crnogorski": {
+        "title": "Herceg Novi - Autobus Uživo",
+        "wait_label": "Gdje čekate autobus?",
+        "next_arr": "Sledeći autobus za",
+        "mins": "min",
+        "no_bus": "Trenutno nema aktivnih autobusa na Liniji 1.",
+        "refresh": "Osvježi mapu"
+    },
+    "🇷🇺 Русский": {
+        "title": "Автобус Герцег-Нови Живьем",
+        "wait_label": "Где вы ждете?",
+        "next_arr": "Следующий автобус до",
+        "mins": "мин",
+        "no_bus": "На Линии 1 сейчас нет активных автобусов.",
+        "refresh": "Обновить карту"
+    }
+}
+
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -24,19 +52,23 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. STATE ENGINE ---
+# --- 3. STATE ENGINE & LANGUAGE SELECTOR ---
+# Fixed Language Dropdown in Sidebar
+selected_lang_name = st.sidebar.selectbox("Language / Jezik / Язык", list(LANGS.keys()))
+txt = LANGS[selected_lang_name]
+
 if "selected_station" not in st.session_state:
     qp = st.query_params
     st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
 # --- 4. UI HEADER ---
-st.title("🚌 Herceg Novi Live Bus")
+st.title(f"🚌 {txt['title']}")
 
 def handle_dropdown():
     st.session_state.selected_station = st.session_state.manual_choice
 
 selected_stop = st.selectbox(
-    "Where are you waiting?",
+    txt['wait_label'],
     options=ROUTE_ORDER,
     index=ROUTE_ORDER.index(st.session_state.selected_station),
     key="manual_choice",
@@ -71,9 +103,9 @@ for doc in buses_ref:
 # Display Metric
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
-    st.metric(f"Next Bus to {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} mins")
+    st.metric(f"{txt['next_arr']} {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
 else:
-    st.warning("No buses currently active on Line 1.")
+    st.warning(txt['no_bus'])
 
 # --- 6. MAP LAYERS ---
 station_df = pd.DataFrame([
@@ -100,7 +132,7 @@ if all_bus_etas:
     bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
     layers.append(pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15))
 
-# --- 7. THE BRIGHT MAP FIX ---
+# --- 7. THE BRIGHT MAP ---
 view = pdk.ViewState(
     latitude=STATIONS[st.session_state.selected_station]["lat"], 
     longitude=STATIONS[st.session_state.selected_station]["lon"], 
@@ -108,22 +140,20 @@ view = pdk.ViewState(
 )
 
 map_data = None 
-
 try:
-    # We use 'light' style as it is the most stable bright option
     map_data = st.pydeck_chart(
         pdk.Deck(
             layers=layers, 
             initial_view_state=view, 
             tooltip={"text": "{name}"},
-            map_style="light" # Simplified style name to bypass some token issues
+            map_style="light" 
         ),
         on_select="rerun",
         selection_mode="single-object",
         key="bus_map"
     )
 except Exception as e:
-    st.error("Map tiles could not load. Check your Mapbox Token.")
+    st.error("Map tiles could not load.")
 
 # --- 8. CLICK HANDLER ---
 if map_data is not None and map_data.selection:
