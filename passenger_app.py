@@ -111,25 +111,32 @@ if all_bus_etas:
         size_scale=15
     ))
 
-# --- 7. RENDER ---
-view = pdk.ViewState(
-    latitude=STATIONS[st.session_state.selected_station]["lat"], 
-    longitude=STATIONS[st.session_state.selected_station]["lon"], 
-    zoom=13
-)
-
+# --- 7. THE INTERACTIVE MAP ---
 try:
     map_data = st.pydeck_chart(
         pdk.Deck(
             layers=layers, 
             initial_view_state=view, 
             tooltip={"text": "{name}"},
-            map_style="mapbox://styles/mapbox/dark-v10"
+            # CHANGED: 'dark-v10' to 'streets-v11' for a bright, high-detail map
+            map_style="mapbox://styles/mapbox/streets-v11" 
         ),
         on_select="rerun",
         selection_mode="single-object",
         key="bus_map"
     )
+
+    # --- 8. THE CATCHER (Handle Click) ---
+    if map_data and map_data.selection:
+        objs = map_data.selection.get("objects", {}).get("station_layer")
+        if objs:
+            new_station = objs[0]["name"]
+            if new_station != st.session_state.selected_station:
+                st.session_state.selected_station = new_station
+                st.rerun()
+except Exception as e:
+    # This prevents the "Unexpected {" crash from hiding your ETA
+    st.error("Map is temporarily unavailable, but check the live ETA above!")
 
     # --- 8. HANDLE CLICK ---
     if map_data and map_data.selection:
