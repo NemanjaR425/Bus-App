@@ -18,9 +18,9 @@ STATIONS = {
 ROUTE_ORDER = list(STATIONS.keys())
 
 LANGS = {
-    "EN": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active.", "label": "EN"},
-    "ME": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa.", "label": "MNE"},
-    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов.", "label": "Ру"}
+    "EN": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active."},
+    "ME": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa."},
+    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов."}
 }
 
 # --- 2. INITIALIZATION ---
@@ -30,11 +30,17 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. STATE ---
+# --- 3. STATE & QUERY PARAMS ---
+# Check URL for language changes first
+query_params = st.query_params
+if "lang" in query_params:
+    st.session_state.lang = query_params["lang"]
+
 if "lang" not in st.session_state:
     st.session_state.lang = "EN"
+
 if "selected_station" not in st.session_state:
-    st.session_state.selected_station = ROUTE_ORDER[0]
+    st.session_state.selected_station = query_params.get("station", ROUTE_ORDER[0])
 
 txt = LANGS[st.session_state.lang]
 
@@ -44,62 +50,54 @@ st.title(f"🚌 {txt['title']}")
 def handle_dropdown():
     st.session_state.selected_station = st.session_state.manual_choice
 
-st.selectbox(txt['wait'], options=ROUTE_ORDER, index=ROUTE_ORDER.index(st.session_state.selected_station), key="manual_choice", on_change=handle_dropdown)
+st.selectbox(txt['wait'], options=ROUTE_ORDER, 
+             index=ROUTE_ORDER.index(st.session_state.selected_station), 
+             key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. THE "FIXED" LANGUAGE BAR ---
+# --- 5. THE "TRUE FLEX" LANGUAGE BAR ---
 st.write("---")
 
-st.markdown("""
+# This CSS creates a tight row of circles. We use <a> tags styled as buttons.
+# They look like your previous "Set EN" buttons but round and tight.
+st.markdown(f"""
     <style>
-    div[data-testid="stHorizontalBlock"] {
+    .lang-container {{
         display: flex !important;
         flex-direction: row !important;
-        flex-wrap: nowrap !important;
+        gap: 10px !important;
         justify-content: flex-start !important;
-        gap: 12px !important;
-        width: 100% !important;
-    }
-    div[data-testid="column"] {
-        width: 65px !important;
-        flex: 0 0 65px !important;
-        padding: 0px !important;
-    }
-    .stButton > button {
+        margin-bottom: 20px;
+    }}
+    .lang-btn {{
+        width: 60px !important;
+        height: 60px !important;
         border-radius: 50% !important;
-        width: 62px !important;
-        height: 62px !important;
-        padding: 0px !important;
-        font-weight: bold !important;
-        font-size: 14px !important;
         border: 2px solid #4CAF50 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-    }
-    .stButton > button[kind="primary"] {
-        background-color: #4CAF50 !important;
+        text-decoration: none !important;
         color: white !important;
-    }
+        font-weight: bold !important;
+        font-size: 14px !important;
+        transition: 0.2s;
+        background-color: transparent;
+    }}
+    .lang-btn:hover {{
+        background-color: rgba(76, 175, 80, 0.2);
+    }}
+    .active-lang {{
+        background-color: #4CAF50 !important;
+        box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+    }}
     </style>
+    
+    <div class="lang-container">
+        <a href="/?lang=ME" target="_self" class="lang-btn {'active-lang' if st.session_state.lang == 'ME' else ''}">MNE</a>
+        <a href="/?lang=EN" target="_self" class="lang-btn {'active-lang' if st.session_state.lang == 'EN' else ''}">EN</a>
+        <a href="/?lang=RU" target="_self" class="lang-btn {'active-lang' if st.session_state.lang == 'RU' else ''}">РУ</a>
+    </div>
 """, unsafe_allow_html=True)
-
-c1, c2, c3, spacer = st.columns([1, 1, 1, 10])
-
-with c1:
-    mne_type = "primary" if st.session_state.lang == "ME" else "secondary"
-    if st.button("MNE", key="mne", type=mne_type):
-        st.session_state.lang = "ME"
-        st.rerun()
-with c2:
-    en_type = "primary" if st.session_state.lang == "EN" else "secondary"
-    if st.button("EN", key="en", type=en_type):
-        st.session_state.lang = "EN"
-        st.rerun()
-with c3:
-    ru_type = "primary" if st.session_state.lang == "RU" else "secondary"
-    if st.button("Ру", key="ru", type=ru_type):
-        st.session_state.lang = "RU"
-        st.rerun()
 
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
@@ -112,7 +110,9 @@ for doc in buses_ref:
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
-        res = gmaps.directions(origin=(bus['lat'], bus['lon']), destination=(STATIONS[target]['lat'], STATIONS[target]['lon']), waypoints=route_waypoints, mode="driving", departure_time="now")
+        res = gmaps.directions(origin=(bus['lat'], bus['lon']), 
+                               destination=(STATIONS[target]['lat'], STATIONS[target]['lon']), 
+                               waypoints=route_waypoints, mode="driving", departure_time="now")
         if res:
             seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
             all_bus_etas.append({"seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
@@ -135,10 +135,4 @@ view = pdk.ViewState(latitude=42.4572, longitude=18.5383, zoom=12.5)
 s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="stops", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
 b_layer = pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
 
-map_data = st.pydeck_chart(pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}), on_select="rerun", selection_mode="single-object", key="bus_map")
-
-if map_data and map_data.selection:
-    objs = map_data.selection.get("objects", {}).get("stops")
-    if objs:
-        st.session_state.selected_station = objs[0]["name"]
-        st.rerun()
+st.pydeck_chart(pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}))
