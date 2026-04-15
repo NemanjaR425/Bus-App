@@ -20,7 +20,7 @@ ROUTE_ORDER = list(STATIONS.keys())
 LANGS = {
     "EN": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active."},
     "ME": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa."},
-    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов."}
+    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных autobusa."}
 }
 
 # --- 2. INITIALIZATION ---
@@ -33,7 +33,6 @@ gmaps = googlemaps.Client(key=st.secrets["api_key"])
 # --- 3. STATE ---
 if "lang" not in st.session_state:
     st.session_state.lang = "EN"
-
 if "selected_station" not in st.session_state:
     st.session_state.selected_station = ROUTE_ORDER[0]
 
@@ -49,36 +48,45 @@ st.selectbox(txt['wait'], options=ROUTE_ORDER,
              index=ROUTE_ORDER.index(st.session_state.selected_station), 
              key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. THE "GRID" LANGUAGE BAR (Forced Horizontal) ---
+# --- 5. THE "FORCED ROW" LANGUAGE BAR ---
 st.write("---")
 
+# This CSS targets every level of the Streamlit column structure to force a horizontal row
 st.markdown("""
     <style>
-    /* 1. Target the vertical block inside the container and force it to be a row */
-    [data-testid="stVerticalBlock"] > div:has(div > .stButton) {
+    /* Force the parent container to be a row and NEVER wrap */
+    [data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 10px !important;
+        align-items: center !important;
         justify-content: flex-start !important;
+        gap: 10px !important;
+    }
+    
+    /* Ensure individual columns don't grow or stack */
+    [data-testid="column"] {
+        width: fit-content !important;
+        flex: unset !important;
+        min-width: unset !important;
     }
 
-    /* 2. Style buttons into tight circles */
+    /* Style buttons into circles */
     .stButton > button {
         border-radius: 50% !important;
         width: 60px !important;
         height: 60px !important;
-        min-width: 60px !important;
         padding: 0px !important;
         font-weight: bold !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
         border: 2px solid #4CAF50 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
+        transition: 0.2s;
     }
 
-    /* 3. Selected state */
+    /* Selection Highlight */
     .stButton > button[kind="primary"] {
         background-color: #4CAF50 !important;
         color: white !important;
@@ -86,18 +94,22 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Placing buttons inside a single container so the CSS can find them as siblings
-with st.container():
-    if st.button("MNE", key="btn_me", type="primary" if st.session_state.lang == "ME" else "secondary"):
+# Using columns now because the CSS above "breaks" Streamlit's responsive stacking
+c1, c2, c3, _ = st.columns([1, 1, 1, 10])
+
+with c1:
+    if st.button("MNE", key="me", type="primary" if st.session_state.lang == "ME" else "secondary"):
         st.session_state.lang = "ME"
         st.rerun()
-    if st.button("EN", key="btn_en", type="primary" if st.session_state.lang == "EN" else "secondary"):
+with c2:
+    if st.button("EN", key="en", type="primary" if st.session_state.lang == "EN" else "secondary"):
         st.session_state.lang = "EN"
         st.rerun()
-    if st.button("РУ", key="btn_ru", type="primary" if st.session_state.lang == "RU" else "secondary"):
+with c3:
+    if st.button("РУ", key="ru", type="primary" if st.session_state.lang == "RU" else "secondary"):
         st.session_state.lang = "RU"
         st.rerun()
-        
+
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
@@ -106,6 +118,7 @@ for doc in buses_ref:
     bus = doc.to_dict()
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
+    # Using local coastal waypoints for the Boka region
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
