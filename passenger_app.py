@@ -29,7 +29,7 @@ if "selected_station" not in st.session_state:
     qp = st.query_params
     st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
-# --- 4. THE UI HEADER ---
+# --- 4. UI HEADER ---
 st.title("🚌 Herceg Novi Live Bus")
 
 def handle_dropdown():
@@ -43,7 +43,8 @@ selected_stop = st.selectbox(
     on_change=handle_dropdown
 )
 
-# --- 5. BUS DATA & ETA (PRIORITY RENDERING) ---
+# --- 5. BUS DATA & ETA CALCULATION ---
+# We run this before the map to ensure metrics show even if the map crashes
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
@@ -51,7 +52,7 @@ for doc in buses_ref:
     bus = doc.to_dict()
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
-    # Correct waypoint logic for the region
+    # Waypoints for the local route
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
@@ -65,18 +66,23 @@ for doc in buses_ref:
         )
         if res:
             seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
-            all_bus_etas.append({"id": bus.get('bus_id'), "seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
+            all_bus_etas.append({
+                "id": bus.get('bus_id'), 
+                "seconds": seconds, 
+                "lat": bus['lat'], 
+                "lon": bus['lon']
+            })
     except:
         continue
 
-# Display Metrics BEFORE the map so they show up even if the map snags
+# Display Metric
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
     st.metric(f"Next Bus to {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} mins")
 else:
     st.warning("No buses currently active on Line 1.")
 
-# --- 6. MAP LAYERS ---
+# --- 6. MAP LAYERS PREP ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -84,7 +90,6 @@ station_df = pd.DataFrame([
     } for n, c in STATIONS.items()
 ])
 
-# Always include the station layer
 layers = [
     pdk.Layer(
         "ScatterplotLayer", 
@@ -97,10 +102,13 @@ layers = [
     )
 ]
 
-# CRITICAL FIX: Only add the IconLayer if bus data exists
+# Only build IconLayer if there are active buses to prevent JSON errors
 if all_bus_etas:
     bus_df = pd.DataFrame(all_bus_etas)
-    bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
+    bus_df['icon_data'] = [
+        {"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} 
+        for _ in range(len(bus_df))
+    ]
     
     layers.append(pdk.Layer(
         "IconLayer", 
@@ -111,40 +119,36 @@ if all_bus_etas:
         size_scale=15
     ))
 
-# --- 7. THE INTERACTIVE MAP ---
+# --- 7. THE BRIGHT INTERACTIVE MAP ---
+view = pdk.ViewState(
+    latitude=STATIONS[st.session_state.selected_station]["lat"], 
+    longitude=STATIONS[st.session_state.selected_station]["lon"], 
+    zoom=13
+)
+
+map_data = None # Pre-initialize to avoid NameError
+
 try:
     map_data = st.pydeck_chart(
         pdk.Deck(
             layers=layers, 
             initial_view_state=view, 
             tooltip={"text": "{name}"},
-            # CHANGED: 'dark-v10' to 'streets-v11' for a bright, high-detail map
+            # Map style set to bright 'streets'
             map_style="mapbox://styles/mapbox/streets-v11" 
         ),
         on_select="rerun",
         selection_mode="single-object",
         key="bus_map"
     )
-
-    # --- 8. THE CATCHER (Handle Click) ---
-    if map_data and map_data.selection:
-        objs = map_data.selection.get("objects", {}).get("station_layer")
-        if objs:
-            new_station = objs[0]["name"]
-            if new_station != st.session_state.selected_station:
-                st.session_state.selected_station = new_station
-                st.rerun()
 except Exception as e:
-    # This prevents the "Unexpected {" crash from hiding your ETA
-    st.error("Map is temporarily unavailable, but check the live ETA above!")
+    st.error("Map loading issue. Live ETA above is still active.")
 
-    # --- 8. HANDLE CLICK ---
-    if map_data and map_data.selection:
-        objs = map_data.selection.get("objects", {}).get("station_layer")
-        if objs:
-            new_station = objs[0]["name"]
-            if new_station != st.session_state.selected_station:
-                st.session_state.selected_station = new_station
-                st.rerun()
-except Exception as e:
-    st.error("Map loading error. ETA metrics above are still active.")
+# --- 8. CLICK HANDLER ---
+if map_data is not None and map_data.selection:
+    objs = map_data.selection.get("objects", {}).get("station_layer")
+    if objs:
+        new_station = objs[0]["name"]
+        if new_station != st.session_state.selected_station:
+            st.session_state.selected_station = new_station
+            st.rerun()
