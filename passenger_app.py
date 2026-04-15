@@ -120,24 +120,58 @@ station_df = pd.DataFrame([
     } for n, c in STATIONS.items()
 ])
 
-bus_df = pd.DataFrame(all_bus_etas)
-if not bus_df.empty:
-    bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
+# Initialize the layers list with the station layer (which always has data)
+layers = [
+    pdk.Layer(
+        "ScatterplotLayer", 
+        data=station_df, 
+        id="station_layer", 
+        get_position="[lon, lat]", 
+        get_color="color", 
+        get_radius=180, 
+        pickable=True
+    )
+]
 
-view = pdk.ViewState(latitude=42.4572, longitude=18.5283, zoom=12.5)
+# CRITICAL FIX: Only create and add the bus layer if buses exist
+if all_bus_etas:
+    bus_df = pd.DataFrame(all_bus_etas)
+    bus_df['icon_data'] = [
+        {"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} 
+        for _ in range(len(bus_df))
+    ]
+    
+    b_layer = pdk.Layer(
+        "IconLayer", 
+        data=bus_df, 
+        get_position="[lon, lat]", 
+        get_icon="icon_data", 
+        get_size=5, 
+        size_scale=15
+    )
+    layers.append(b_layer)
 
-s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="station_layer", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
-b_layer = pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
+# Map Rendering
+view = pdk.ViewState(
+    latitude=STATIONS[st.session_state.selected_station]["lat"], 
+    longitude=STATIONS[st.session_state.selected_station]["lon"], 
+    zoom=13
+)
 
 map_data = st.pydeck_chart(
-    pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
+    pdk.Deck(
+        layers=layers, 
+        initial_view_state=view, 
+        tooltip={"text": "{name}"},
+        map_style="mapbox://styles/mapbox/dark-v10"
+    ),
     on_select="rerun",
     selection_mode="single-object",
     key="bus_map"
 )
 
-# Handle Map Selection
-if map_data.selection:
+# Handle Map Selection (unchanged)
+if map_data and map_data.selection:
     objs = map_data.selection.get("objects", {}).get("station_layer")
     if objs:
         new_station = objs[0]["name"]
