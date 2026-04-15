@@ -1,6 +1,6 @@
 import streamlit as st
+import pdk
 import pandas as pd
-import pydeck as pdk
 import firebase_admin
 from firebase_admin import credentials, firestore
 import googlemaps
@@ -33,10 +33,8 @@ gmaps = googlemaps.Client(key=st.secrets["api_key"])
 # --- 3. STATE ---
 if "lang" not in st.session_state:
     st.session_state.lang = "EN"
-
 if "selected_station" not in st.session_state:
-    qp = st.query_params
-    st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
+    st.session_state.selected_station = ROUTE_ORDER[0]
 
 txt = LANGS[st.session_state.lang]
 
@@ -48,66 +46,66 @@ def handle_dropdown():
 
 st.selectbox(txt['wait'], options=ROUTE_ORDER, index=ROUTE_ORDER.index(st.session_state.selected_station), key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. FIXED LANGUAGE BAR (Absolute Control) ---
+# --- 5. THE "FIXED" LANGUAGE BAR ---
 st.write("---")
 
-# We use CSS to target the radio buttons directly because st.columns is too unstable on mobile
+# CSS to force buttons to be round, large, and tightly packed in one row
 st.markdown("""
     <style>
-    /* Force Radio Group to look like tight circular buttons */
-    div[data-role="radiogroup"] {
+    /* Force horizontal row that NEVER wraps on mobile */
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
         flex-direction: row !important;
-        gap: 10px !important; /* EXACT gap between circles */
+        flex-wrap: nowrap !important;
         justify-content: flex-start !important;
+        gap: 12px !important;
+        width: 100% !important;
     }
-    div[data-role="radiogroup"] label {
+    /* Set fixed sizes for the columns so they don't grow */
+    div[data-testid="column"] {
+        width: 65px !important;
+        flex: 0 0 65px !important;
         padding: 0px !important;
-        margin: 0px !important;
-        min-width: 55px !important;
-        width: 55px !important;
-        height: 55px !important;
+    }
+    /* Style the actual buttons */
+    .stButton > button {
         border-radius: 50% !important;
+        width: 62px !important;
+        height: 62px !important;
+        padding: 0px !important;
+        font-weight: bold !important;
+        font-size: 14px !important;
         border: 2px solid #4CAF50 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        background-color: transparent !important;
     }
-    /* Hide the radio circle icon */
-    div[data-role="radiogroup"] label [data-testid="stWidgetLabel"] {
-        display: none !important;
-    }
-    div[data-role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
-        margin: 0px !important;
-        font-weight: bold !important;
-    }
-    /* Selection highlight */
-    div[data-role="radiogroup"] label:has(input:checked) {
+    /* Highlight the active language */
+    .stButton > button[kind="primary"] {
         background-color: #4CAF50 !important;
         color: white !important;
-    }
-    div[data-role="radiogroup"] label > div:first-child {
-        display: none !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Map for internal state vs display label
-label_to_code = {"MNE": "ME", "EN": "EN", "Ру": "RU"}
-code_to_label = {v: k for k, v in label_to_code.items()}
+# Create 4 columns: 3 for buttons, 1 as a "spacer" to push them left
+c1, c2, c3, spacer = st.columns([1, 1, 1, 10])
 
-# Using st.radio as it is one single block (no columns to break)
-new_label = st.radio(
-    "Language",
-    options=["MNE", "EN", "Ру"],
-    index=["MNE", "EN", "Ру"].index(code_to_label[st.session_state.lang]),
-    horizontal=True,
-    label_visibility="collapsed"
-)
-
-if label_to_code[new_label] != st.session_state.lang:
-    st.session_state.lang = label_to_code[new_label]
-    st.rerun()
+with c1:
+    mne_type = "primary" if st.session_state.lang == "ME" else "secondary"
+    if st.button("MNE", key="mne", type=mne_type):
+        st.session_state.lang = "ME"
+        st.rerun()
+with c2:
+    en_type = "primary" if st.session_state.lang == "EN" else "secondary"
+    if st.button("EN", key="en", type=en_type):
+        st.session_state.lang = "EN"
+        st.rerun()
+with c3:
+    ru_type = "primary" if st.session_state.lang == "RU" else "secondary"
+    if st.button("Ру", key="ru", type=ru_type):
+        st.session_state.lang = "RU"
+        st.rerun()
 
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
@@ -148,6 +146,5 @@ map_data = st.pydeck_chart(pdk.Deck(layers=[s_layer, b_layer], initial_view_stat
 if map_data and map_data.selection:
     objs = map_data.selection.get("objects", {}).get("stops")
     if objs:
-        if objs[0]["name"] != st.session_state.selected_station:
-            st.session_state.selected_station = objs[0]["name"]
-            st.rerun()
+        st.session_state.selected_station = objs[0]["name"]
+        st.rerun()
