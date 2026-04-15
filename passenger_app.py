@@ -8,7 +8,6 @@ import googlemaps
 # --- 1. CONFIG & DATA ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
-# Static Station Data for Line 1
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -18,32 +17,10 @@ STATIONS = {
 }
 ROUTE_ORDER = list(STATIONS.keys())
 
-# Localization Strings
 LANGS = {
-    "EN": {
-        "title": "Herceg Novi Live Bus",
-        "wait_label": "Where are you waiting?",
-        "next_arr": "Next Bus to",
-        "mins": "mins",
-        "no_bus": "No buses active on Line 1.",
-        "label": "EN"
-    },
-    "ME": {
-        "title": "Herceg Novi - Autobus Uživo",
-        "wait_label": "Gdje čekate autobus?",
-        "next_arr": "Sledeći autobus za",
-        "mins": "min",
-        "no_bus": "Nema aktivnih autobusa na Liniji 1.",
-        "label": "MNE"
-    },
-    "RU": {
-        "title": "Автобус Герцег-Нови Живьем",
-        "wait_label": "Где вы ждете?",
-        "next_arr": "Следующий автобус до",
-        "mins": "мин",
-        "no_bus": "На Линии 1 нет активных автобусов.",
-        "label": "Ру"
-    }
+    "EN": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active.", "label": "EN"},
+    "ME": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa.", "label": "MNE"},
+    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов.", "label": "Ру"}
 }
 
 # --- 2. INITIALIZATION ---
@@ -53,89 +30,84 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. STATE MANAGEMENT ---
+# --- 3. STATE ---
 if "lang" not in st.session_state:
     st.session_state.lang = "EN"
 
 if "selected_station" not in st.session_state:
     qp = st.query_params
-    url_station = qp.get("station")
-    st.session_state.selected_station = url_station if url_station in ROUTE_ORDER else ROUTE_ORDER[0]
+    st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
 txt = LANGS[st.session_state.lang]
 
-# --- 4. UI: TITLE & DROPDOWN ---
+# --- 4. UI: TITLE & SELECTOR ---
 st.title(f"🚌 {txt['title']}")
 
 def handle_dropdown():
     st.session_state.selected_station = st.session_state.manual_choice
 
-selected_stop = st.selectbox(
-    txt['wait_label'],
-    options=ROUTE_ORDER,
-    index=ROUTE_ORDER.index(st.session_state.selected_station),
-    key="manual_choice",
-    on_change=handle_dropdown
-)
+st.selectbox(txt['wait'], options=ROUTE_ORDER, index=ROUTE_ORDER.index(st.session_state.selected_station), key="manual_choice", on_change=handle_dropdown)
 
-# --- 5. ROUND LANGUAGE BAR (FORCED HORIZONTAL) ---
+# --- 5. FIXED LANGUAGE BAR (Absolute Control) ---
 st.write("---")
+
+# We use CSS to target the radio buttons directly because st.columns is too unstable on mobile
 st.markdown("""
     <style>
-    /* Force horizontal layout on mobile and kill wrapping */
-    div[data-testid="stHorizontalBlock"] {
-        display: flex !important;
+    /* Force Radio Group to look like tight circular buttons */
+    div[data-role="radiogroup"] {
         flex-direction: row !important;
-        flex-wrap: nowrap !important;
+        gap: 10px !important; /* EXACT gap between circles */
         justify-content: flex-start !important;
-        gap: 8px !important;
-        width: 100% !important;
     }
-    div[data-testid="column"] {
-        width: auto !important;
-        flex: 0 0 auto !important;
-        min-width: 0px !important;
+    div[data-role="radiogroup"] label {
         padding: 0px !important;
-    }
-    /* Circular Buttons Styling */
-    .stButton > button {
+        margin: 0px !important;
+        min-width: 55px !important;
+        width: 55px !important;
+        height: 55px !important;
         border-radius: 50% !important;
-        width: 58px !important;
-        height: 58px !important;
-        padding: 0px !important;
-        font-weight: bold !important;
-        font-size: 13px !important;
+        border: 2px solid #4CAF50 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        border: 2px solid #4CAF50 !important;
-        transition: 0.2s ease-in-out;
+        background-color: transparent !important;
     }
-    .stButton > button[kind="primary"] {
+    /* Hide the radio circle icon */
+    div[data-role="radiogroup"] label [data-testid="stWidgetLabel"] {
+        display: none !important;
+    }
+    div[data-role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
+        margin: 0px !important;
+        font-weight: bold !important;
+    }
+    /* Selection highlight */
+    div[data-role="radiogroup"] label:has(input:checked) {
         background-color: #4CAF50 !important;
         color: white !important;
     }
+    div[data-role="radiogroup"] label > div:first-child {
+        display: none !important;
+    }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# 15 as the last ratio pushes buttons to the far left
-c1, c2, c3, _ = st.columns([1, 1, 1, 15])
+# Map for internal state vs display label
+label_to_code = {"MNE": "ME", "EN": "EN", "Ру": "RU"}
+code_to_label = {v: k for k, v in label_to_code.items()}
 
-with c1:
-    mne_style = "primary" if st.session_state.lang == "ME" else "secondary"
-    if st.button("MNE", key="btn_mne", type=mne_style):
-        st.session_state.lang = "ME"
-        st.rerun()
-with c2:
-    en_style = "primary" if st.session_state.lang == "EN" else "secondary"
-    if st.button("EN", key="btn_en", type=en_style):
-        st.session_state.lang = "EN"
-        st.rerun()
-with c3:
-    ru_style = "primary" if st.session_state.lang == "RU" else "secondary"
-    if st.button("Ру", key="btn_ru", type=ru_style):
-        st.session_state.lang = "RU"
-        st.rerun()
+# Using st.radio as it is one single block (no columns to break)
+new_label = st.radio(
+    "Language",
+    options=["MNE", "EN", "Ру"],
+    index=["MNE", "EN", "Ру"].index(code_to_label[st.session_state.lang]),
+    horizontal=True,
+    label_visibility="collapsed"
+)
+
+if label_to_code[new_label] != st.session_state.lang:
+    st.session_state.lang = label_to_code[new_label]
+    st.rerun()
 
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
@@ -145,66 +117,37 @@ for doc in buses_ref:
     bus = doc.to_dict()
     target = st.session_state.selected_station
     target_idx = ROUTE_ORDER.index(target)
-    
-    # Accurate coastal waypoints for the Google Directions API
     route_waypoints = [f"{STATIONS[ROUTE_ORDER[i]]['lat']},{STATIONS[ROUTE_ORDER[i]]['lon']}" for i in range(target_idx)]
 
     try:
-        res = gmaps.directions(
-            origin=(bus['lat'], bus['lon']),
-            destination=(STATIONS[target]['lat'], STATIONS[target]['lon']),
-            waypoints=route_waypoints,
-            optimize_waypoints=False,
-            mode="driving",
-            departure_time="now"
-        )
+        res = gmaps.directions(origin=(bus['lat'], bus['lon']), destination=(STATIONS[target]['lat'], STATIONS[target]['lon']), waypoints=route_waypoints, mode="driving", departure_time="now")
         if res:
             seconds = sum(l.get('duration_in_traffic', l['duration'])['value'] for l in res[0]['legs'])
-            all_bus_etas.append({
-                "id": bus.get('bus_id'), 
-                "seconds": seconds, 
-                "lat": bus['lat'], 
-                "lon": bus['lon']
-            })
+            all_bus_etas.append({"seconds": seconds, "lat": bus['lat'], "lon": bus['lon']})
     except:
         continue
 
-# Render Results
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
-    st.metric(f"{txt['next_arr']} {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
+    st.metric(f"{txt['next']} {st.session_state.selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
 else:
-    st.warning(txt['no_bus'])
+    st.warning(txt['none'])
 
-# --- 7. INTERACTIVE MAP ---
-station_df = pd.DataFrame([
-    {
-        'name': n, 'lat': c['lat'], 'lon': c['lon'], 
-        'color': [255, 0, 0, 255] if n == st.session_state.selected_station else [0, 100, 255, 160]
-    } for n, c in STATIONS.items()
-])
-
+# --- 7. MAP ---
+station_df = pd.DataFrame([{'name': n, 'lat': c['lat'], 'lon': c['lon'], 'color': [255, 0, 0, 255] if n == st.session_state.selected_station else [0, 100, 255, 160]} for n, c in STATIONS.items()])
 bus_df = pd.DataFrame(all_bus_etas)
 if not bus_df.empty:
     bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
 
 view = pdk.ViewState(latitude=42.4572, longitude=18.5383, zoom=12.5)
-
-s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="stops_layer", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
+s_layer = pdk.Layer("ScatterplotLayer", data=station_df, id="stops", get_position="[lon, lat]", get_color="color", get_radius=180, pickable=True)
 b_layer = pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15)
 
-map_data = st.pydeck_chart(
-    pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}),
-    on_select="rerun",
-    selection_mode="single-object",
-    key="bus_map"
-)
+map_data = st.pydeck_chart(pdk.Deck(layers=[s_layer, b_layer], initial_view_state=view, tooltip={"text": "{name}"}), on_select="rerun", selection_mode="single-object", key="bus_map")
 
-# Catch Map Selection Events
 if map_data and map_data.selection:
-    objs = map_data.selection.get("objects", {}).get("stops_layer")
+    objs = map_data.selection.get("objects", {}).get("stops")
     if objs:
-        new_pick = objs[0]["name"]
-        if new_pick != st.session_state.selected_station:
-            st.session_state.selected_station = new_pick
+        if objs[0]["name"] != st.session_state.selected_station:
+            st.session_state.selected_station = objs[0]["name"]
             st.rerun()
