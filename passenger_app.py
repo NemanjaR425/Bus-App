@@ -13,26 +13,26 @@ LANGS = {
     "🇬🇧 English": {
         "title": "Herceg Novi Live Bus",
         "wait_label": "Where are you waiting?",
+        "lang_label": "Select Language",
         "next_arr": "Next Bus to",
         "mins": "mins",
         "no_bus": "No buses currently active on Line 1.",
-        "refresh": "Refresh Map"
     },
     "🇲🇪 Crnogorski": {
         "title": "Herceg Novi - Autobus Uživo",
         "wait_label": "Gdje čekate autobus?",
+        "lang_label": "Izaberite jezik",
         "next_arr": "Sledeći autobus za",
         "mins": "min",
         "no_bus": "Trenutno nema aktivnih autobusa na Liniji 1.",
-        "refresh": "Osvježi mapu"
     },
     "🇷🇺 Русский": {
         "title": "Автобус Герцег-Нови Живьем",
         "wait_label": "Где вы ждете?",
+        "lang_label": "Выберите язык",
         "next_arr": "Следующий автобус до",
         "mins": "мин",
         "no_bus": "На Линии 1 сейчас нет активных автобусов.",
-        "refresh": "Обновить карту"
     }
 }
 
@@ -52,30 +52,36 @@ if not firebase_admin._apps:
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 3. STATE ENGINE & LANGUAGE SELECTOR ---
-# Fixed Language Dropdown in Sidebar
-selected_lang_name = st.sidebar.selectbox("Language / Jezik / Язык", list(LANGS.keys()))
-txt = LANGS[selected_lang_name]
+# --- 3. UI: TITLE & SELECTORS (IN-LINE) ---
+st.title("🚌 Live Bus") # Static prefix to ensure title always renders
 
 if "selected_station" not in st.session_state:
     qp = st.query_params
     st.session_state.selected_station = qp.get("station") if qp.get("station") in ROUTE_ORDER else ROUTE_ORDER[0]
 
-# --- 4. UI HEADER ---
-st.title(f"🚌 {txt['title']}")
-
-def handle_dropdown():
+# Station Dropdown
+def handle_station():
     st.session_state.selected_station = st.session_state.manual_choice
 
 selected_stop = st.selectbox(
-    txt['wait_label'],
+    "Location", # Temporary placeholder until lang is set
     options=ROUTE_ORDER,
     index=ROUTE_ORDER.index(st.session_state.selected_station),
     key="manual_choice",
-    on_change=handle_dropdown
+    on_change=handle_station,
+    label_visibility="collapsed" # Tidy layout
 )
 
-# --- 5. BUS DATA & ETA ---
+# Language Dropdown directly below
+selected_lang_name = st.selectbox(
+    "Language",
+    options=list(LANGS.keys()),
+    key="lang_choice",
+    label_visibility="collapsed"
+)
+txt = LANGS[selected_lang_name]
+
+# --- 4. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
@@ -107,7 +113,7 @@ if all_bus_etas:
 else:
     st.warning(txt['no_bus'])
 
-# --- 6. MAP LAYERS ---
+# --- 5. MAP PREP ---
 station_df = pd.DataFrame([
     {
         'name': n, 'lat': c['lat'], 'lon': c['lon'], 
@@ -132,7 +138,7 @@ if all_bus_etas:
     bus_df['icon_data'] = [{"url": "https://img.icons8.com/color/48/bus.png", "width": 100, "height": 100, "anchorY": 100} for _ in range(len(bus_df))]
     layers.append(pdk.Layer("IconLayer", data=bus_df, get_position="[lon, lat]", get_icon="icon_data", get_size=5, size_scale=15))
 
-# --- 7. THE BRIGHT MAP ---
+# --- 6. RENDER BRIGHT MAP ---
 view = pdk.ViewState(
     latitude=STATIONS[st.session_state.selected_station]["lat"], 
     longitude=STATIONS[st.session_state.selected_station]["lon"], 
@@ -146,16 +152,16 @@ try:
             layers=layers, 
             initial_view_state=view, 
             tooltip={"text": "{name}"},
-            map_style="light" 
+            map_style="light" # Stable bright style
         ),
         on_select="rerun",
         selection_mode="single-object",
         key="bus_map"
     )
 except Exception as e:
-    st.error("Map tiles could not load.")
+    st.error("Map loading error.")
 
-# --- 8. CLICK HANDLER ---
+# --- 7. HANDLE MAP CLICK ---
 if map_data is not None and map_data.selection:
     objs = map_data.selection.get("objects", {}).get("station_layer")
     if objs:
