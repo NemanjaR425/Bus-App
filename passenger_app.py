@@ -76,48 +76,58 @@ selected_stop = st.selectbox(
     on_change=handle_dropdown
 )
 
-# --- 5. ROUND LANGUAGE BUTTONS (Horizontal) ---
+# --- 5. ROUND LANGUAGE BUTTONS (Tight Spacing) ---
 st.markdown("""
     <style>
-    /* Force columns to stay side-by-side on mobile */
+    /* Force columns to stay tight and horizontal */
     div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         display: flex !important;
         flex-wrap: nowrap !important;
         justify-content: flex-start !important;
+        gap: 10px !important; /* Tightens the gap between buttons */
     }
     [data-testid="column"] {
-        width: 70px !important;
-        flex: 0 0 70px !important;
-        min-width: 70px !important;
+        width: 65px !important;
+        flex: 0 0 65px !important;
+        min-width: 65px !important;
+        padding: 0px !important; /* Removes default column padding */
     }
-    /* Make buttons round */
+    /* Round Button Styling */
     .stButton > button {
-        border-radius: 50px !important;
+        border-radius: 50% !important;
         width: 60px !important;
         height: 60px !important;
         padding: 0px !important;
         font-weight: bold !important;
-        border: 2px solid #4CAF50 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: 0.3s;
     }
-    /* Highlight the active language */
     </style>
     """, unsafe_allow_html=True)
 
-c1, c2, c3, _ = st.columns([1, 1, 1, 5])
+# Using a small container to help keep them grouped
+with st.container():
+    c1, c2, c3, _ = st.columns([1, 1, 1, 10]) # The '10' pushes empty space to the right
 
-with c1:
-    if st.button(LANGS["ME"]["label"], key="btn_me"):
-        st.session_state.lang = "ME"
-        st.rerun()
-with c2:
-    if st.button(LANGS["EN"]["label"], key="btn_en"):
-        st.session_state.lang = "EN"
-        st.rerun()
-with c3:
-    if st.button(LANGS["RU"]["label"], key="btn_ru"):
-        st.session_state.lang = "RU"
-        st.rerun()
+    with c1:
+        # If active, make the border thicker/different color
+        me_style = "primary" if st.session_state.lang == "ME" else "secondary"
+        if st.button(LANGS["ME"]["label"], key="btn_me", type=me_style):
+            st.session_state.lang = "ME"
+            st.rerun()
+    with c2:
+        en_style = "primary" if st.session_state.lang == "EN" else "secondary"
+        if st.button(LANGS["EN"]["label"], key="btn_en", type=en_style):
+            st.session_state.lang = "EN"
+            st.rerun()
+    with c3:
+        ru_style = "primary" if st.session_state.lang == "RU" else "secondary"
+        if st.button(LANGS["RU"]["label"], key="btn_ru", type=ru_style):
+            st.session_state.lang = "RU"
+            st.rerun()
 
 # --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
