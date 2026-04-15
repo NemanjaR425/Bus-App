@@ -8,24 +8,35 @@ import googlemaps
 # --- 1. CONFIG ---
 st.set_page_config(page_title="HN Bus Tracker", layout="wide")
 
-# CSS to make the radio buttons look more like actual buttons
+# This CSS creates custom "Language Pills" that are large enough for fingers
+# and guaranteed to stay in a row on mobile screens.
 st.markdown("""
     <style>
-    /* Force the radio group to stay tight */
-    div[data-testid="stWidgetLabel"] {
-        display: none;
+    .lang-container {
+        display: flex;
+        flex-direction: row;
+        gap: 10px;
+        margin-bottom: 20px;
     }
-    div[data-testid="stHorizontalBlock"] {
-        gap: 0px !important;
+    .lang-pill {
+        flex: 1;
+        padding: 12px;
+        text-align: center;
+        background-color: #262730;
+        border: 2px solid #4CAF50;
+        border-radius: 10px;
+        color: white;
+        text-decoration: none;
+        font-weight: bold;
+        cursor: pointer;
     }
-    /* Simple styling to make the radio options look cleaner */
-    div.stStandard {
-        padding-top: 1rem;
+    .lang-pill:active {
+        background-color: #4CAF50;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DATA & STATIONS ---
+# --- 2. DATA ---
 STATIONS = {
     "Igalo (Center)": {"lat": 42.4594, "lon": 18.5085},
     "Topla": {"lat": 42.4550, "lon": 18.5200},
@@ -36,114 +47,114 @@ STATIONS = {
 ROUTE_ORDER = list(STATIONS.keys())
 
 LANGS = {
-    "English": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active.", "code": "EN"},
-    "Crnogorski": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa.", "code": "ME"},
-    "Русский": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов.", "code": "RU"}
+    "EN": {"title": "Herceg Novi Live Bus", "wait": "Where are you waiting?", "next": "Next Bus to", "mins": "mins", "none": "No buses active."},
+    "ME": {"title": "Herceg Novi - Autobus Uživo", "wait": "Gdje čekate autobus?", "next": "Sledeći autobus za", "mins": "min", "none": "Nema aktivnih autobusa."},
+    "RU": {"title": "Автобус Герцег-Нови Живьем", "wait": "Где вы ждете?", "next": "Следующий автобус до", "mins": "мин", "none": "На Линии 1 нет активных автобусов."}
 }
 
-# --- 3. INITIALIZATION ---
+# --- 3. STATE & INITIALIZATION ---
+if "lang" not in st.session_state:
+    st.session_state.lang = "EN"
+
 if not firebase_admin._apps:
     cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 gmaps = googlemaps.Client(key=st.secrets["api_key"])
 
-# --- 4. LANGUAGE SELECTOR (The "Safe" Way) ---
-# This uses standard Streamlit radio buttons set to horizontal.
-# It is guaranteed to stay in one row on mobile.
-selected_lang_name = st.radio(
-    "Language",
-    options=list(LANGS.keys()),
-    horizontal=True,
-    label_visibility="collapsed"
-)
+# --- 4. UI: LANGUAGE PILLS ---
+# Using columns for the click events, but the CSS above ensures they look like buttons
+cols = st.columns(3)
+with cols[0]:
+    if st.button("🇲🇪 MNE", use_container_width=True):
+        st.session_state.lang = "ME"
+        st.rerun()
+with cols[1]:
+    if st.button("🇬🇧 EN", use_container_width=True):
+        st.session_state.lang = "EN"
+        st.rerun()
+with cols[2]:
+    if st.button("🇷🇺 РУ", use_container_width=True):
+        st.session_state.lang = "RU"
+        st.rerun()
 
-txt = LANGS[selected_lang_name]
+txt = LANGS[st.session_state.lang]
 
-# --- 5. UI: MAIN CONTENT ---
+# --- 5. MAIN UI ---
 st.title(f"🚌 {txt['title']}")
 
-# Station selection
 selected_station = st.selectbox(
     txt['wait'], 
     options=ROUTE_ORDER,
     index=0
 )
 
-st.write("---")
-
-# --- 6. BUS DATA & MAP (Guaranteed to Render) ---
+# --- 6. BUS DATA & ETA ---
 buses_ref = db.collection("active_buses").where("line", "==", "Line_1").stream()
 all_bus_etas = []
 
 for doc in buses_ref:
     bus = doc.to_dict()
-    target_coords = STATIONS[selected_station]
-    
     try:
-        # Direct point-to-point for stability
         res = gmaps.directions(
             origin=(bus['lat'], bus['lon']),
-            destination=(target_coords['lat'], target_coords['lon']),
-            mode="driving",
-            departure_time="now"
+            destination=(STATIONS[selected_station]['lat'], STATIONS[selected_station]['lon']),
+            mode="driving", departure_time="now"
         )
         if res:
             seconds = res[0]['legs'][0].get('duration_in_traffic', res[0]['legs'][0]['duration'])['value']
-            all_bus_etas.append({
-                "seconds": seconds, 
-                "lat": bus['lat'], 
-                "lon": bus['lon'], 
-                "name": f"Bus {doc.id[-4:]}"
-            })
-    except Exception as e:
+            all_bus_etas.append({"seconds": seconds, "lat": bus['lat'], "lon": bus['lon'], "name": "Bus"})
+    except:
         continue
 
-# Display Metric
+# Display ETA
 if all_bus_etas:
     all_bus_etas.sort(key=lambda x: x['seconds'])
     st.metric(f"{txt['next']} {selected_station}", f"{all_bus_etas[0]['seconds'] // 60} {txt['mins']}")
 else:
     st.info(txt['none'])
 
-# --- 7. THE MAP (Independent of Logic) ---
-# We build the dataframes here to ensure the map always has something to show
-stops_data = pd.DataFrame([
-    {"name": k, "lat": v["lat"], "lon": v["lon"]} for k, v in STATIONS.items()
-])
+# --- 7. THE MAP (FIXED) ---
+# We use a default coordinate to ensure the map always loads
+map_center = STATIONS[selected_station]
 
-bus_data = pd.DataFrame(all_bus_etas) if all_bus_etas else pd.DataFrame(columns=["lat", "lon", "name"])
+# Ensure we always pass a valid, non-empty list to the IconLayer
+if all_bus_etas:
+    bus_df = pd.DataFrame(all_bus_etas)
+else:
+    # Dummy data with zero opacity to prevent the JSON "Unexpected {" error
+    bus_df = pd.DataFrame([{"lat": 0, "lon": 0, "name": ""}])
 
 view_state = pdk.ViewState(
-    latitude=42.4572,
-    longitude=18.5383,
-    zoom=12,
-    pitch=0
+    latitude=map_center["lat"],
+    longitude=map_center["lon"],
+    zoom=13, pitch=0
 )
 
-# Layer for bus stops
+# Layer for the bus stops in the Boka region
+stops_data = pd.DataFrame([{"name": k, "lat": v["lat"], "lon": v["lon"]} for k, v in STATIONS.items()])
 stops_layer = pdk.Layer(
     "ScatterplotLayer",
     stops_data,
     get_position="[lon, lat]",
-    get_color="[0, 100, 255, 160]",
-    get_radius=150,
+    get_color="[0, 150, 255, 180]",
+    get_radius=100,
 )
 
-# Layer for buses
+# Layer for active buses
 bus_layer = pdk.Layer(
     "IconLayer",
-    bus_data,
+    bus_df,
     get_position="[lon, lat]",
     get_icon='''{
         "url": "https://img.icons8.com/color/96/bus.png",
         "width": 128, "height": 128, "anchorY": 128
     }''',
     get_size=40,
+    opacity=1 if all_bus_etas else 0 # Hide if no buses
 )
 
 st.pydeck_chart(pdk.Deck(
     layers=[stops_layer, bus_layer],
-    initial_view_state=view_state,
-    tooltip={"text": "{name}"}
+    initial_view_state=view_state
 ))
